@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn weight_text_rejects_empty_negative_fraction_and_overflow() {
-        for raw in ["", "-1", "1.5", "4294967296", "abc"] {
+        for raw in ["", " ", "-1", "1.5", "4294967296", "abc"] {
             assert!(
                 Weights::parse_weight(raw).is_err(),
                 "{raw:?} must be rejected"

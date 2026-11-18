@@ -49,6 +49,82 @@ pub enum ChatCommand {
     Leave,
 }
 
+pub fn to_chat_message(msg: &PrivmsgMessage) -> ChatMessage {
+    ChatMessage {
+        user_id: msg.sender.id.clone(),
+        display_name: msg.sender.name.clone(),
+        badges: msg
+            .badges
+            .iter()
+            .map(|b| Badge::new(b.name.clone(), b.version.clone()))
+            .collect(),
+        text: msg.message_text.clone(),
+    }
+}
+
+/// Handle to the chat thread. Dropping it closes the command channel and stops the thread.
+pub struct ChatBridge {
+    pub commands: async_channel::Sender<ChatCommand>,
+    pub events: async_channel::Receiver<ChatEvent>,
+}
+
+impl ChatBridge {
+    /// Starts the chat thread. `problems` receives connection problems reported by `twitch-irc`
+    /// (see [`connection_problem_layer`]).
+    pub fn spawn(problems: async_channel::Receiver<String>) -> std::io::Result<Self> {
+        let (command_tx, command_rx) = async_channel::unbounded();
+        let (event_tx, event_rx) = async_channel::unbounded();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        thread::Builder::new()
+            .name("twitch-chat".into())
+            .spawn(move || runtime.block_on(run(command_rx, event_tx, problems)))?;
+        Ok(Self {
+            commands: command_tx,
+            events: event_rx,
+        })
+    }
+}
+
+/// A `tracing` layer that forwards the connection problems `twitch-irc` only logs (dropped
+/// connection, transport errors), so the UI can show why the chat disconnected.
+pub fn connection_problem_layer() -> (ConnectionProblemLayer, async_channel::Receiver<String>) {
+    let (tx, rx) = async_channel::unbounded();
+    (ConnectionProblemLayer { problems: tx }, rx)
+}
+
+pub struct ConnectionProblemLayer {
+    problems: async_channel::Sender<String>,
+}
+
+impl<S: tracing::Subscriber> Layer<S> for ConnectionProblemLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, _: Context<'_, S>) {
+        let meta = event.metadata();
+        if !meta.target().starts_with("twitch_irc") {
+            return;
+        }
+        let mut message = MessageField(String::new());
+        event.record(&mut message);
+        let is_problem =
+            *meta.level() == tracing::Level::ERROR || message.0.starts_with("Closing connection");
+        if is_problem {
+            // The receiver lives as long as the chat thread; after it ends there is nobody to tell.
+            let _ = self.problems.try_send(message.0);
+        }
+    }
+}
+
+struct MessageField(String);
+
+impl Visit for MessageField {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.0 = format!("{value:?}");
+        }
+    }
+}
+
 /// Connection status of the one channel the bridge watches.
 #[derive(Debug, Default)]
 struct StatusTracker {
@@ -99,44 +175,6 @@ impl StatusTracker {
 
     fn connection_problem(&mut self, cause: String) {
         self.last_cause = Some(cause);
-    }
-}
-
-pub fn to_chat_message(msg: &PrivmsgMessage) -> ChatMessage {
-    ChatMessage {
-        user_id: msg.sender.id.clone(),
-        display_name: msg.sender.name.clone(),
-        badges: msg
-            .badges
-            .iter()
-            .map(|b| Badge::new(b.name.clone(), b.version.clone()))
-            .collect(),
-        text: msg.message_text.clone(),
-    }
-}
-
-/// Handle to the chat thread. Dropping it closes the command channel and stops the thread.
-pub struct ChatBridge {
-    pub commands: async_channel::Sender<ChatCommand>,
-    pub events: async_channel::Receiver<ChatEvent>,
-}
-
-impl ChatBridge {
-    /// Starts the chat thread. `problems` receives connection problems reported by `twitch-irc`
-    /// (see [`connection_problem_layer`]).
-    pub fn spawn(problems: async_channel::Receiver<String>) -> std::io::Result<Self> {
-        let (command_tx, command_rx) = async_channel::unbounded();
-        let (event_tx, event_rx) = async_channel::unbounded();
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        thread::Builder::new()
-            .name("twitch-chat".into())
-            .spawn(move || runtime.block_on(run(command_rx, event_tx, problems)))?;
-        Ok(Self {
-            commands: command_tx,
-            events: event_rx,
-        })
     }
 }
 
@@ -216,44 +254,6 @@ fn is_watched(tracker: &StatusTracker, channel_login: &str) -> bool {
         .channel
         .as_ref()
         .is_some_and(|c| c.as_str() == channel_login)
-}
-
-/// A `tracing` layer that forwards the connection problems `twitch-irc` only logs (dropped
-/// connection, transport errors), so the UI can show why the chat disconnected.
-pub fn connection_problem_layer() -> (ConnectionProblemLayer, async_channel::Receiver<String>) {
-    let (tx, rx) = async_channel::unbounded();
-    (ConnectionProblemLayer { problems: tx }, rx)
-}
-
-pub struct ConnectionProblemLayer {
-    problems: async_channel::Sender<String>,
-}
-
-impl<S: tracing::Subscriber> Layer<S> for ConnectionProblemLayer {
-    fn on_event(&self, event: &tracing::Event<'_>, _: Context<'_, S>) {
-        let meta = event.metadata();
-        if !meta.target().starts_with("twitch_irc") {
-            return;
-        }
-        let mut message = MessageField(String::new());
-        event.record(&mut message);
-        let is_problem =
-            *meta.level() == tracing::Level::ERROR || message.0.starts_with("Closing connection");
-        if is_problem {
-            // The receiver lives as long as the chat thread; after it ends there is nobody to tell.
-            let _ = self.problems.try_send(message.0);
-        }
-    }
-}
-
-struct MessageField(String);
-
-impl Visit for MessageField {
-    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
-            self.0 = format!("{value:?}");
-        }
-    }
 }
 
 #[cfg(test)]

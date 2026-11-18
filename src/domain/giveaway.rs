@@ -38,6 +38,7 @@ pub enum MessageOutcome {
     Ignored,
 }
 
+/// Result of one draw.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DrawOutcome {
     Winner(Entrant),
@@ -46,6 +47,7 @@ pub enum DrawOutcome {
     NoDrawable,
 }
 
+/// One giveaway: its keyword rule, open/closed state, entrants and past winners.
 #[derive(Debug, Clone)]
 pub struct Giveaway {
     keyword: Keyword,

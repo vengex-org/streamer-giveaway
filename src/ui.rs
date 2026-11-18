@@ -278,7 +278,7 @@ impl AppView {
                 },
             ),
         };
-        let connected = !matches!(self.status, ConnectionStatus::Idle);
+        let has_channel = !matches!(self.status, ConnectionStatus::Idle);
         h_flex()
             .gap_2()
             .items_center()
@@ -295,7 +295,7 @@ impl AppView {
                     .ghost()
                     .small()
                     .label("Disconnect")
-                    .disabled(!connected)
+                    .disabled(!has_channel)
                     .on_click(cx.listener(|this, _, _, cx| this.disconnect(cx))),
             )
             .child(div().size(px(10.)).rounded_full().bg(color))

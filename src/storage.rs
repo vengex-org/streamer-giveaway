@@ -5,6 +5,7 @@ use directories::ProjectDirs;
 
 use crate::domain::config::Config;
 
+/// Saving the settings failed.
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
     #[error("cannot write settings to {path}: {source}")]
@@ -13,6 +14,7 @@ pub enum StorageError {
     Serialize(#[from] toml::ser::Error),
 }
 
+/// Settings read at startup.
 #[derive(Debug)]
 pub struct Loaded {
     pub config: Config,
@@ -127,6 +129,15 @@ mod tests {
         assert!(warning.contains("config.toml"), "{warning}");
         let backup = fs::read_to_string(dir.path().join("config.toml.bak")).unwrap();
         assert_eq!(backup, "weights = [not toml");
+    }
+
+    #[test]
+    fn unreadable_path_gives_defaults_and_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let loaded = ConfigStore::at(dir.path()).load();
+        assert_eq!(loaded.config, Config::default());
+        let warning = loaded.warning.expect("warning for an unreadable path");
+        assert!(warning.starts_with("cannot read"), "{warning}");
     }
 
     #[test]
