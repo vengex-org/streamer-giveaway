@@ -37,7 +37,7 @@ The first build takes several minutes.
 A chatter's role is refreshed by each of their later messages, so a viewer who subscribes after
 entering gets the sub weight.
 
-Settings (channel, keyword, mode, weights) are saved to `%APPDATA%\yep-giveaway\config\config.toml`
+Settings (channel, keyword, mode, weights) are saved to `%APPDATA%\streamer-giveaway\config\config.toml`
 on Windows, or to the platform's config directory elsewhere. Entrants are not saved.
 
 ## Development
