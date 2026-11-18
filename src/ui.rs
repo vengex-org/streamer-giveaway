@@ -1,9 +1,11 @@
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::label::Label;
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::collections::BTreeMap;
 
 use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
 use crate::domain::chat::{ChannelLogin, Keyword};
@@ -13,14 +15,28 @@ use crate::domain::matcher::MatchMode;
 use crate::domain::role::{Role, Weights};
 use crate::storage::ConfigStore;
 
+/// What a notice is about. Each source replaces or clears only its own notice, so fixing one
+/// problem never hides another that still exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum NoticeSource {
+    Startup,
+    Save,
+    Chat,
+    Channel,
+    Keyword,
+    Weight(Role),
+    Draw,
+}
+
 pub struct AppView {
     config: Config,
     store: Option<ConfigStore>,
     giveaway: Giveaway,
     commands: async_channel::Sender<ChatCommand>,
     status: ConnectionStatus,
-    /// Last problem worth telling the user: invalid input, failed save, rejected command.
-    notice: Option<String>,
+    /// Problems worth telling the user, at most one per source.
+    notices: BTreeMap<NoticeSource, String>,
+    entrants_scroll: UniformListScrollHandle,
     winner: Option<Entrant>,
     channel_input: Entity<InputState>,
     keyword_input: Entity<InputState>,
@@ -96,7 +112,11 @@ impl AppView {
             store,
             commands: bridge.commands,
             status: ConnectionStatus::Idle,
-            notice: startup_notice,
+            notices: startup_notice
+                .map(|text| (NoticeSource::Startup, text))
+                .into_iter()
+                .collect(),
+            entrants_scroll: UniformListScrollHandle::new(),
             winner: None,
             channel_input,
             keyword_input,
@@ -116,7 +136,7 @@ impl AppView {
                 true
             }
             ChatEvent::Rejected(reason) => {
-                self.notice = Some(reason);
+                self.set_notice(NoticeSource::Chat, Some(reason));
                 true
             }
         }
@@ -142,7 +162,7 @@ impl AppView {
         cx: &mut Context<Self>,
     ) {
         if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-            self.commit_rule(cx);
+            self.commit_rule(self.config.mode, cx);
             cx.notify();
         }
     }
@@ -151,21 +171,31 @@ impl AppView {
     /// field, and before opening entries or switching mode (buttons do not take focus, so the
     /// field never blurs on a click). Never per keystroke: a half-typed keyword would let
     /// unintended messages into an open giveaway. Returns false when the keyword is invalid.
-    fn commit_rule(&mut self, cx: &mut Context<Self>) -> bool {
+    fn commit_rule(&mut self, mode: MatchMode, cx: &mut Context<Self>) -> bool {
         match Keyword::parse(&self.keyword_input.read(cx).value()) {
             Ok(keyword) => {
-                self.config.keyword = keyword;
-                self.giveaway
-                    .set_rule(self.config.keyword.clone(), self.config.mode);
-                self.notice = None;
-                self.save();
+                self.set_notice(NoticeSource::Keyword, None);
+                if keyword != self.config.keyword || mode != self.config.mode {
+                    self.config.keyword = keyword;
+                    self.config.mode = mode;
+                    self.giveaway
+                        .set_rule(self.config.keyword.clone(), self.config.mode);
+                    self.save();
+                }
                 true
             }
             Err(err) => {
-                self.notice = Some(err.to_string());
+                self.set_notice(NoticeSource::Keyword, Some(err.to_string()));
                 false
             }
         }
+    }
+
+    fn set_notice(&mut self, source: NoticeSource, text: Option<String>) {
+        match text {
+            Some(text) => self.notices.insert(source, text),
+            None => self.notices.remove(&source),
+        };
     }
 
     fn connect(&mut self, cx: &mut Context<Self>) {
@@ -173,10 +203,11 @@ impl AppView {
             Ok(channel) => {
                 self.send(ChatCommand::Join(channel.clone()));
                 self.config.channel = Some(channel);
-                self.notice = None;
+                self.set_notice(NoticeSource::Channel, None);
+                self.set_notice(NoticeSource::Chat, None);
                 self.save();
             }
-            Err(err) => self.notice = Some(err.to_string()),
+            Err(err) => self.set_notice(NoticeSource::Channel, Some(err.to_string())),
         }
         cx.notify();
     }
@@ -188,35 +219,41 @@ impl AppView {
 
     fn send(&mut self, command: ChatCommand) {
         if self.commands.try_send(command).is_err() {
-            self.notice = Some("chat connection thread has stopped; restart the app".into());
+            self.set_notice(
+                NoticeSource::Chat,
+                Some("chat connection thread has stopped; restart the app".into()),
+            );
         }
     }
 
     fn set_mode(&mut self, mode: MatchMode, cx: &mut Context<Self>) {
-        self.config.mode = mode;
-        self.commit_rule(cx);
+        self.commit_rule(mode, cx);
         cx.notify();
     }
 
     fn set_weight(&mut self, role: Role, text: &str, cx: &mut Context<Self>) {
         match Weights::parse_weight(text) {
             Ok(weight) => {
-                self.config.weights.set(role, weight);
-                self.notice = None;
-                self.save();
+                self.set_notice(NoticeSource::Weight(role), None);
+                if self.config.weights.get(role) != weight {
+                    self.config.weights.set(role, weight);
+                    self.save();
+                }
             }
-            Err(err) => self.notice = Some(format!("{}: {err}", role.label())),
+            Err(err) => self.set_notice(
+                NoticeSource::Weight(role),
+                Some(format!("{}: {err}", role.label())),
+            ),
         }
         cx.notify();
     }
 
     fn save(&mut self) {
-        let Some(store) = &self.store else {
-            self.notice = Some("no user config directory; settings are not saved".into());
-            return;
-        };
-        if let Err(err) = store.save(&self.config) {
-            self.notice = Some(err.to_string());
+        // Without a store the startup notice already says that settings are not saved.
+        let Some(store) = &self.store else { return };
+        match store.save(&self.config) {
+            Ok(()) => self.set_notice(NoticeSource::Save, None),
+            Err(err) => self.set_notice(NoticeSource::Save, Some(err.to_string())),
         }
     }
 
@@ -224,15 +261,18 @@ impl AppView {
         match self.giveaway.draw(&self.config.weights, &mut rand::rng()) {
             DrawOutcome::Winner(winner) => {
                 self.winner = Some(winner);
-                self.notice = None;
+                self.set_notice(NoticeSource::Draw, None);
             }
             DrawOutcome::EmptyPool => {
                 self.winner = None;
-                self.notice = Some("nobody has entered yet".into());
+                self.set_notice(NoticeSource::Draw, Some("nobody can win yet".into()));
             }
             DrawOutcome::NoDrawable => {
                 self.winner = None;
-                self.notice = Some("every entrant has weight 0; raise a weight to draw".into());
+                self.set_notice(
+                    NoticeSource::Draw,
+                    Some("every entrant has weight 0; raise a weight to draw".into()),
+                );
             }
         }
         cx.notify();
@@ -241,7 +281,7 @@ impl AppView {
     fn set_state(&mut self, state: GiveawayState, cx: &mut Context<Self>) {
         match state {
             GiveawayState::Open => {
-                if self.commit_rule(cx) {
+                if self.commit_rule(self.config.mode, cx) {
                     self.giveaway.open();
                 }
             }
@@ -380,7 +420,7 @@ impl AppView {
                         div()
                             .text_xs()
                             .text_color(muted)
-                            .child(format!("{count} in pool")),
+                            .child(format!("{count} can win")),
                     )
             }))
     }
@@ -414,7 +454,14 @@ impl AppView {
                     .collect::<Vec<_>>()
             }),
         )
-        .flex_1();
+        .track_scroll(&self.entrants_scroll)
+        .size_full();
+        let can_win: usize = self
+            .giveaway
+            .counts_by_role(&self.config.weights)
+            .iter()
+            .map(|(_, n)| n)
+            .sum();
         v_flex()
             .flex_1()
             .min_h_0()
@@ -430,15 +477,21 @@ impl AppView {
                     .font_semibold()
                     .border_b_1()
                     .border_color(theme.border)
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(format!("Entrants ({})", self.giveaway.entrants().len())),
-                    )
+                    .child(div().flex_1().child(format!(
+                        "Entrants ({}, {can_win} can win)",
+                        self.giveaway.entrants().len()
+                    )))
                     .child(div().w(px(80.)).child("Role"))
                     .child(div().w(px(60.)).text_right().child("Tickets")),
             )
-            .child(rows)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(rows)
+                    .child(Scrollbar::vertical(&self.entrants_scroll).viewport_from_layout()),
+            )
     }
 
     fn render_draw(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -459,10 +512,12 @@ impl AppView {
                     .text_color(theme.success)
                     .child(format!("Winner: {}", w.display_name))
             }))
-            .children(
-                self.notice
-                    .as_ref()
-                    .map(|n| div().text_sm().text_color(theme.danger).child(n.clone())),
+            .child(
+                v_flex().children(
+                    self.notices
+                        .values()
+                        .map(|n| div().text_sm().text_color(theme.danger).child(n.clone())),
+                ),
             )
     }
 }
