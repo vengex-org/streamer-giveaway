@@ -20,13 +20,19 @@ fn main() {
         .init();
 
     let store = ConfigStore::in_user_config_dir();
-    let Loaded { config, warning } = match &store {
+    let Loaded {
+        config,
+        warning,
+        may_save,
+    } = match &store {
         Some(store) => store.load(),
         None => Loaded {
             config: Default::default(),
             warning: Some("no user config directory; settings are not saved".into()),
+            may_save: false,
         },
     };
+    let store = store.filter(|_| may_save);
     let bridge = ChatBridge::spawn(problems).expect("failed to start the chat thread");
 
     gpui_kit::application().run(move |cx| {

@@ -1,4 +1,6 @@
+use std::io::Write as _;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, io};
 
 use directories::ProjectDirs;
@@ -20,6 +22,9 @@ pub struct Loaded {
     pub config: Config,
     /// Set when a settings file exists but could not be used; defaults were loaded instead.
     pub warning: Option<String>,
+    /// False when the existing file could neither be used nor set aside: saving would overwrite
+    /// the user's settings with defaults, so the app must not save this session.
+    pub may_save: bool,
 }
 
 /// Reads and writes the settings file.
@@ -40,34 +45,55 @@ impl ConfigStore {
     }
 
     pub fn load(&self) -> Loaded {
+        let path = self.path.display();
         let text = match fs::read_to_string(&self.path) {
             Ok(text) => text,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Self::defaults(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Self::defaults(None, true),
+            // Locked, no permission, not UTF-8: the file may be fine, so leave it alone.
             Err(err) => {
-                return Self::defaults(Some(format!("cannot read {}: {err}", self.path.display())));
+                let warning = format!("cannot read {path}: {err}; settings are not saved");
+                return Self::defaults(Some(warning), false);
             }
         };
-        match Config::from_toml(&text) {
-            Ok(config) => Loaded {
-                config,
-                warning: None,
-            },
-            Err(err) => Self::defaults(Some(self.set_aside_invalid(&err))),
+        let err = match Config::from_toml(&text) {
+            Ok(config) => {
+                return Loaded {
+                    config,
+                    warning: None,
+                    may_save: true,
+                };
+            }
+            Err(err) => err,
+        };
+        match self.set_aside() {
+            Ok(backup) => {
+                let warning = format!(
+                    "invalid settings in {path}, using defaults (kept a copy in {}): {err}",
+                    backup.display()
+                );
+                Self::defaults(Some(warning), true)
+            }
+            Err(rename_err) => {
+                let warning = format!(
+                    "invalid settings in {path}, using defaults and not saving                      (could not keep a copy: {rename_err}): {err}"
+                );
+                Self::defaults(Some(warning), false)
+            }
         }
     }
 
-    /// Moves an unreadable settings file to `<name>.bak`, so the next save does not overwrite the
-    /// user's settings with defaults.
-    fn set_aside_invalid(&self, err: &toml::de::Error) -> String {
-        let backup = self.path.with_extension("toml.bak");
-        let kept = match fs::rename(&self.path, &backup) {
-            Ok(()) => format!("kept a copy in {}", backup.display()),
-            Err(rename_err) => format!("could not keep a copy: {rename_err}"),
-        };
-        format!(
-            "invalid settings in {}, using defaults ({kept}): {err}",
-            self.path.display()
-        )
+    /// Moves the settings file to a backup name that is not taken yet, so the next save does not
+    /// overwrite the user's settings with defaults and an older backup survives.
+    fn set_aside(&self) -> io::Result<PathBuf> {
+        let mut backup = self.path.with_extension("toml.bak");
+        if backup.exists() {
+            let secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            backup = self.path.with_extension(format!("toml.{secs}.bak"));
+        }
+        fs::rename(&self.path, &backup)?;
+        Ok(backup)
     }
 
     pub fn save(&self, config: &Config) -> Result<(), StorageError> {
@@ -79,16 +105,21 @@ impl ConfigStore {
         if let Some(dir) = self.path.parent() {
             fs::create_dir_all(dir).map_err(write_error)?;
         }
-        // Write a sibling file and rename it over the old one, so a crash never leaves half a file.
+        // Write a sibling file, flush it to disk and rename it over the old one, so a crash or
+        // power loss never leaves half a file.
         let partial = self.path.with_extension("toml.partial");
-        fs::write(&partial, text).map_err(write_error)?;
+        let mut file = fs::File::create(&partial).map_err(write_error)?;
+        file.write_all(text.as_bytes()).map_err(write_error)?;
+        file.sync_all().map_err(write_error)?;
+        drop(file);
         fs::rename(&partial, &self.path).map_err(write_error)
     }
 
-    fn defaults(warning: Option<String>) -> Loaded {
+    fn defaults(warning: Option<String>, may_save: bool) -> Loaded {
         Loaded {
             config: Config::default(),
             warning,
+            may_save,
         }
     }
 }
@@ -138,6 +169,22 @@ mod tests {
         assert_eq!(loaded.config, Config::default());
         let warning = loaded.warning.expect("warning for an unreadable path");
         assert!(warning.starts_with("cannot read"), "{warning}");
+        assert!(!loaded.may_save);
+    }
+
+    #[test]
+    fn second_corrupt_file_keeps_the_first_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let store = ConfigStore::at(&path);
+        fs::write(&path, "first = [").unwrap();
+        assert!(store.load().may_save);
+        fs::write(&path, "second = [").unwrap();
+        assert!(store.load().may_save);
+        let first = fs::read_to_string(dir.path().join("config.toml.bak")).unwrap();
+        assert_eq!(first, "first = [");
+        let backups = fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(backups, 2);
     }
 
     #[test]
