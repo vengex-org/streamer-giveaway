@@ -1,24 +1,46 @@
-use gpui_kit::component::label::Label;
-use gpui_kit::component::*;
 use gpui_kit::*;
-
-struct AppView;
-
-impl Render for AppView {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .v_flex()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .child(Label::new("yep-giveaway"))
-    }
-}
+use tracing_subscriber::prelude::*;
+use yep_giveaway::chat::{ChatBridge, connection_problem_layer};
+use yep_giveaway::storage::{ConfigStore, Loaded};
+use yep_giveaway::ui::AppView;
 
 fn main() {
-    gpui_kit::application().run(|cx| {
+    let (problem_layer, problems) = connection_problem_layer();
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_filter(tracing_subscriber::filter::LevelFilter::WARN),
+        )
+        .with(problem_layer)
+        .init();
+
+    let store = ConfigStore::in_user_config_dir();
+    let Loaded { config, warning } = match &store {
+        Some(store) => store.load(),
+        None => Loaded {
+            config: Default::default(),
+            warning: Some("no user config directory; settings are not saved".into()),
+        },
+    };
+    let bridge = ChatBridge::spawn(problems).expect("failed to start the chat thread");
+
+    gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
-        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| AppView))
-            .expect("failed to open the main window");
+        let options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some("YEP giveaway".into()),
+                ..Default::default()
+            }),
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                None,
+                size(px(820.), px(640.)),
+                cx,
+            ))),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, cx, move |window, cx| {
+            cx.new(|cx| AppView::new(bridge, store, config, warning, window, cx))
+        })
+        .expect("failed to open the main window");
     });
 }
