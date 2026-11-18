@@ -12,13 +12,19 @@ use twitch_irc::{ClientConfig, SecureTCPTransport, TwitchIRCClient};
 
 use crate::domain::chat::{Badge, ChannelLogin, ChatMessage};
 
-/// How often the bridge asks `twitch-irc` whether the channel is still joined.
+/// How often the bridge asks `twitch-irc` whether the channel is still joined. A guess, not
+/// measured: short enough that a drop shows within seconds, long enough to cost nothing.
 const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
+/// What the UI shows about the chat connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionStatus {
     Idle,
-    Connecting(ChannelLogin),
+    /// Not joined yet; `cause` is the last problem reported while trying.
+    Connecting {
+        channel: ChannelLogin,
+        cause: Option<String>,
+    },
     Connected(ChannelLogin),
     /// The connection dropped; `twitch-irc` keeps reconnecting on its own.
     Reconnecting {
@@ -27,6 +33,7 @@ pub enum ConnectionStatus {
     },
 }
 
+/// Sent from the chat thread to the UI.
 #[derive(Debug, Clone)]
 pub enum ChatEvent {
     Status(ConnectionStatus),
@@ -35,6 +42,7 @@ pub enum ChatEvent {
     Rejected(String),
 }
 
+/// Sent from the UI to the chat thread. Joining a channel leaves the previous one.
 #[derive(Debug, Clone)]
 pub enum ChatCommand {
     Join(ChannelLogin),
@@ -55,7 +63,10 @@ impl StatusTracker {
         match (&self.channel, self.joined, self.was_joined) {
             (None, _, _) => ConnectionStatus::Idle,
             (Some(c), true, _) => ConnectionStatus::Connected(c.clone()),
-            (Some(c), false, false) => ConnectionStatus::Connecting(c.clone()),
+            (Some(c), false, false) => ConnectionStatus::Connecting {
+                channel: c.clone(),
+                cause: self.last_cause.clone(),
+            },
             (Some(c), false, true) => ConnectionStatus::Reconnecting {
                 channel: c.clone(),
                 cause: self.last_cause.clone(),
@@ -78,6 +89,14 @@ impl StatusTracker {
         self.joined = joined;
     }
 
+    /// Result of asking `twitch-irc` whether the channel is joined. Before the first JOIN echo a
+    /// poll may only confirm the join, never report a drop.
+    fn on_poll(&mut self, joined: bool) {
+        if self.was_joined || joined {
+            self.set_joined(joined);
+        }
+    }
+
     fn connection_problem(&mut self, cause: String) {
         self.last_cause = Some(cause);
     }
@@ -86,7 +105,6 @@ impl StatusTracker {
 pub fn to_chat_message(msg: &PrivmsgMessage) -> ChatMessage {
     ChatMessage {
         user_id: msg.sender.id.clone(),
-        login: msg.sender.login.clone(),
         display_name: msg.sender.name.clone(),
         badges: msg
             .badges
@@ -175,9 +193,7 @@ async fn run(
             _ = poll.tick() => {
                 if let Some(channel) = &tracker.channel {
                     let (_, joined) = client.get_channel_status(channel.as_str().to_owned()).await;
-                    if tracker.was_joined || joined {
-                        tracker.set_joined(joined);
-                    }
+                    tracker.on_poll(joined);
                 }
             }
         }
@@ -263,7 +279,6 @@ mod tests {
             to_chat_message(&msg),
             ChatMessage {
                 user_id: "4242".into(),
-                login: "viewer_1".into(),
                 display_name: "Viewer_1".into(),
                 badges: vec![
                     Badge::new("moderator", "1"),
@@ -280,10 +295,7 @@ mod tests {
         assert_eq!(tracker.status(), ConnectionStatus::Idle);
 
         tracker.watch(Some(channel("streamer")));
-        assert_eq!(
-            tracker.status(),
-            ConnectionStatus::Connecting(channel("streamer"))
-        );
+        assert_eq!(tracker.status(), connecting("streamer", None));
 
         tracker.set_joined(true);
         assert_eq!(
@@ -315,9 +327,70 @@ mod tests {
         tracker.set_joined(true);
         tracker.connection_problem("old problem".into());
         tracker.watch(Some(channel("second")));
+        assert_eq!(tracker.status(), connecting("second", None));
+    }
+
+    fn connecting(name: &str, cause: Option<&str>) -> ConnectionStatus {
+        ConnectionStatus::Connecting {
+            channel: channel(name),
+            cause: cause.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn first_connect_that_fails_shows_the_cause() {
+        let mut tracker = StatusTracker::default();
+        tracker.watch(Some(channel("streamer")));
+        tracker.connection_problem("Underlying transport failed to connect".into());
+        tracker.on_poll(false);
         assert_eq!(
             tracker.status(),
-            ConnectionStatus::Connecting(channel("second"))
+            connecting("streamer", Some("Underlying transport failed to connect"))
         );
+    }
+
+    #[test]
+    fn poll_confirms_first_join_and_later_reports_drop() {
+        let mut tracker = StatusTracker::default();
+        tracker.watch(Some(channel("streamer")));
+        tracker.on_poll(true);
+        assert_eq!(
+            tracker.status(),
+            ConnectionStatus::Connected(channel("streamer"))
+        );
+        tracker.on_poll(false);
+        assert!(matches!(
+            tracker.status(),
+            ConnectionStatus::Reconnecting { .. }
+        ));
+    }
+
+    fn captured_problems(emit: impl FnOnce()) -> Vec<String> {
+        use tracing_subscriber::prelude::*;
+        let (layer, problems) = connection_problem_layer();
+        let subscriber = tracing_subscriber::registry().with(layer);
+        tracing::subscriber::with_default(subscriber, emit);
+        std::iter::from_fn(|| problems.try_recv().ok()).collect()
+    }
+
+    #[test]
+    fn layer_forwards_twitch_irc_errors_and_closing_connection() {
+        let problems = captured_problems(|| {
+            tracing::error!(target: "twitch_irc::connection", "transport failed");
+            tracing::info!(target: "twitch_irc::connection", "Closing connection, cause: timeout");
+        });
+        assert_eq!(
+            problems,
+            ["transport failed", "Closing connection, cause: timeout"]
+        );
+    }
+
+    #[test]
+    fn layer_skips_other_targets_and_routine_info() {
+        let problems = captured_problems(|| {
+            tracing::error!(target: "gpui::window", "unrelated error");
+            tracing::info!(target: "twitch_irc::client", "Making a new pool connection");
+        });
+        assert!(problems.is_empty(), "{problems:?}");
     }
 }

@@ -11,7 +11,12 @@ fn main() {
             tracing_subscriber::fmt::layer()
                 .with_filter(tracing_subscriber::filter::LevelFilter::WARN),
         )
-        .with(problem_layer)
+        .with(
+            problem_layer.with_filter(
+                tracing_subscriber::filter::Targets::new()
+                    .with_target("twitch_irc", tracing::Level::INFO),
+            ),
+        )
         .init();
 
     let store = ConfigStore::in_user_config_dir();
