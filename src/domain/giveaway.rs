@@ -125,9 +125,10 @@ impl Giveaway {
         MessageOutcome::Entered
     }
 
-    /// Picks a winner with probability proportional to their current weight and removes them for
-    /// good: a winner cannot enter again until `reset`.
+    /// Closes entries, then picks a winner with probability proportional to their current weight
+    /// and removes them for good: a winner cannot enter again until `reset`.
     pub fn draw<R: Rng + ?Sized>(&mut self, weights: &Weights, rng: &mut R) -> DrawOutcome {
+        self.close();
         if self.entrants.is_empty() {
             return DrawOutcome::EmptyPool;
         }
@@ -375,6 +376,7 @@ mod tests {
         let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default());
         assert_eq!(outcome, MessageOutcome::Ignored);
         g.reset();
+        g.open();
         let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default());
         assert_eq!(outcome, MessageOutcome::Entered);
     }
@@ -391,6 +393,19 @@ mod tests {
         assert_eq!(
             g.on_message(&msg("2", "!JOIN", &[]), &weights),
             MessageOutcome::Entered
+        );
+    }
+
+    #[test]
+    fn draw_closes_open_entries() {
+        let mut g = open_giveaway();
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        let mut rng = StdRng::seed_from_u64(11);
+        g.draw(&Weights::default(), &mut rng);
+        assert_eq!(g.state(), GiveawayState::Closed);
+        assert_eq!(
+            g.on_message(&msg("2", "YEP", &[]), &Weights::default()),
+            MessageOutcome::Ignored
         );
     }
 
