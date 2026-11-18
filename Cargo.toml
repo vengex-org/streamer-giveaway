@@ -1,0 +1,13 @@
+[package]
+name = "yep-giveaway"
+version = "0.1.0"
+edition = "2024"
+description = "Collect Twitch chat giveaway entries by keyword and draw a weighted winner"
+license = "MIT"
+publish = false
+
+[dependencies]
+gpui-kit = "0.10"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
