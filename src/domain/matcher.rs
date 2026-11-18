@@ -27,8 +27,13 @@ impl MatchMode {
     }
 }
 
+/// Chatterino and 7TV append this invisible tag character to a repeated message so Twitch does
+/// not drop it as a duplicate.
+const DUPLICATE_BYPASS: char = '\u{E0000}';
+
 pub fn matches(mode: MatchMode, keyword: &Keyword, text: &str) -> bool {
     let needle = keyword.folded();
+    let text = text.replace(DUPLICATE_BYPASS, "");
     match mode {
         MatchMode::Exact => text.trim().to_lowercase() == needle,
         MatchMode::Contains => text.to_lowercase().contains(needle),
@@ -89,6 +94,12 @@ mod tests {
     fn exact_mode_trims_message_but_rejects_extra_words() {
         assert!(matches(MatchMode::Exact, &kw("YEP"), "  yep \n"));
         assert!(!matches(MatchMode::Exact, &kw("YEP"), "YEP YEP"));
+    }
+
+    #[test]
+    fn duplicate_bypass_character_is_ignored() {
+        assert!(matches(MatchMode::Exact, &kw("YEP"), "YEP \u{E0000}"));
+        assert!(matches(MatchMode::Word, &kw("YEP"), "YEP\u{E0000}"));
     }
 
     #[test]

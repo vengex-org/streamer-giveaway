@@ -1,5 +1,3 @@
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 /// A chat badge as Twitch sends it in the `badges` tag, e.g. `subscriber/3012`.
@@ -18,10 +16,10 @@ impl Badge {
     }
 }
 
+/// One chat message, reduced to what the giveaway needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatMessage {
     pub user_id: String,
-    pub login: String,
     pub display_name: String,
     pub badges: Vec<Badge>,
     pub text: String,
@@ -41,16 +39,10 @@ pub struct Keyword {
     folded: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The user entered a keyword that is empty after trimming.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("keyword must not be empty")]
 pub struct EmptyKeyword;
-
-impl fmt::Display for EmptyKeyword {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("keyword must not be empty")
-    }
-}
-
-impl std::error::Error for EmptyKeyword {}
 
 impl Keyword {
     pub fn parse(raw: &str) -> Result<Self, EmptyKeyword> {
@@ -79,20 +71,10 @@ impl Keyword {
 #[serde(try_from = "String", into = "String")]
 pub struct ChannelLogin(String);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The user entered a channel name Twitch would not accept.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid channel name '{0}': use 1-25 letters, digits or _")]
 pub struct InvalidChannel(pub String);
-
-impl fmt::Display for InvalidChannel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "invalid channel name '{}': use 1-25 letters, digits or _",
-            self.0
-        )
-    }
-}
-
-impl std::error::Error for InvalidChannel {}
 
 impl ChannelLogin {
     pub fn parse(raw: &str) -> Result<Self, InvalidChannel> {
@@ -184,7 +166,6 @@ mod tests {
     fn broadcaster_is_detected_from_badge() {
         let mut msg = ChatMessage {
             user_id: "1".into(),
-            login: "s".into(),
             display_name: "S".into(),
             badges: vec![Badge::new("subscriber", "0")],
             text: "YEP".into(),

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::chat::Badge;
 
+/// A chatter's standing in the channel; each role has its own weight. Order = rank.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Role {
     Pleb,
@@ -41,7 +42,7 @@ pub fn roles_from_badges(badges: &[Badge]) -> Vec<Role> {
         .filter_map(|badge| match badge.name.as_str() {
             "subscriber" | "founder" => Some(sub_tier(&badge.version)),
             "vip" => Some(Role::Vip),
-            "moderator" => Some(Role::Mod),
+            "moderator" | "lead_moderator" => Some(Role::Mod),
             _ => None,
         })
         .collect();
@@ -89,7 +90,18 @@ impl Default for Weights {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("weight must be a whole number from 0 to {max}, got '{0}'", max = u32::MAX)]
+pub struct InvalidWeight(pub String);
+
 impl Weights {
+    /// Parses a weight typed by the user: a whole number, surrounding whitespace allowed.
+    pub fn parse_weight(raw: &str) -> Result<u32, InvalidWeight> {
+        raw.trim()
+            .parse()
+            .map_err(|_| InvalidWeight(raw.to_owned()))
+    }
+
     pub fn get(&self, role: Role) -> u32 {
         match role {
             Role::Pleb => self.pleb,
@@ -173,6 +185,31 @@ mod tests {
             ("subscriber", "2006"),
         ]));
         assert_eq!(roles, vec![Role::SubT2, Role::Vip, Role::Mod]);
+    }
+
+    #[test]
+    fn lead_moderator_is_mod() {
+        assert_eq!(
+            roles_from_badges(&badges(&[("lead_moderator", "1")])),
+            vec![Role::Mod]
+        );
+    }
+
+    #[test]
+    fn weight_text_accepts_whole_numbers_with_spaces() {
+        assert_eq!(Weights::parse_weight(" 3 "), Ok(3));
+        assert_eq!(Weights::parse_weight("0"), Ok(0));
+        assert_eq!(Weights::parse_weight("4294967295"), Ok(u32::MAX));
+    }
+
+    #[test]
+    fn weight_text_rejects_empty_negative_fraction_and_overflow() {
+        for raw in ["", "-1", "1.5", "4294967296", "abc"] {
+            assert!(
+                Weights::parse_weight(raw).is_err(),
+                "{raw:?} must be rejected"
+            );
+        }
     }
 
     #[test]

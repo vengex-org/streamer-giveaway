@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use indexmap::IndexMap;
 use rand::{Rng, RngExt};
 
@@ -5,6 +7,7 @@ use super::chat::{ChatMessage, Keyword};
 use super::matcher::{MatchMode, matches};
 use super::role::{Role, Weights, roles_from_badges};
 
+/// A chatter who entered the giveaway.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entrant {
     pub user_id: String,
@@ -19,16 +22,19 @@ impl Entrant {
     }
 }
 
+/// Whether matching messages add entrants. A new giveaway starts `Closed`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GiveawayState {
     Open,
     Closed,
 }
 
+/// What a chat message did to the giveaway.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageOutcome {
     Entered,
-    RolesRefreshed,
+    /// The author was already an entrant; their roles and display name were refreshed.
+    AlreadyEntered,
     Ignored,
 }
 
@@ -46,6 +52,8 @@ pub struct Giveaway {
     mode: MatchMode,
     state: GiveawayState,
     entrants: IndexMap<String, Entrant>,
+    /// User ids drawn since the last reset; they cannot enter again.
+    winners: HashSet<String>,
 }
 
 impl Giveaway {
@@ -55,15 +63,8 @@ impl Giveaway {
             mode,
             state: GiveawayState::Closed,
             entrants: IndexMap::new(),
+            winners: HashSet::new(),
         }
-    }
-
-    pub fn keyword(&self) -> &Keyword {
-        &self.keyword
-    }
-
-    pub fn mode(&self) -> MatchMode {
-        self.mode
     }
 
     pub fn set_rule(&mut self, keyword: Keyword, mode: MatchMode) {
@@ -83,8 +84,10 @@ impl Giveaway {
         self.state = GiveawayState::Closed;
     }
 
+    /// Clears entrants and past winners; the open/closed state stays.
     pub fn reset(&mut self) {
         self.entrants.clear();
+        self.winners.clear();
     }
 
     /// Entrants in the order they entered.
@@ -100,9 +103,10 @@ impl Giveaway {
         if let Some(entrant) = self.entrants.get_mut(&msg.user_id) {
             entrant.roles = roles;
             entrant.display_name.clone_from(&msg.display_name);
-            return MessageOutcome::RolesRefreshed;
+            return MessageOutcome::AlreadyEntered;
         }
         let entering = self.state == GiveawayState::Open
+            && !self.winners.contains(&msg.user_id)
             && weights.effective(&roles).1 > 0
             && matches(self.mode, &self.keyword, &msg.text);
         if !entering {
@@ -119,7 +123,8 @@ impl Giveaway {
         MessageOutcome::Entered
     }
 
-    /// Picks a winner with probability proportional to their current weight and removes them.
+    /// Picks a winner with probability proportional to their current weight and removes them for
+    /// good: a winner cannot enter again until `reset`.
     pub fn draw<R: Rng + ?Sized>(&mut self, weights: &Weights, rng: &mut R) -> DrawOutcome {
         if self.entrants.is_empty() {
             return DrawOutcome::EmptyPool;
@@ -146,10 +151,11 @@ impl Giveaway {
             .entrants
             .shift_remove_index(index)
             .expect("index comes from the same map");
+        self.winners.insert(winner.user_id.clone());
         DrawOutcome::Winner(winner)
     }
 
-    /// Entrant count per effective role, in `Role::ALL` order.
+    /// Drawable entrants (weight above 0) per effective role, in `Role::ALL` order.
     pub fn counts_by_role(&self, weights: &Weights) -> Vec<(Role, usize)> {
         Role::ALL
             .iter()
@@ -157,7 +163,10 @@ impl Giveaway {
                 let count = self
                     .entrants
                     .values()
-                    .filter(|e| e.effective(weights).0 == role)
+                    .filter(|e| {
+                        let (effective_role, weight) = e.effective(weights);
+                        effective_role == role && weight > 0
+                    })
                     .count();
                 (role, count)
             })
@@ -176,7 +185,6 @@ mod tests {
     fn msg(user_id: &str, text: &str, badges: &[(&str, &str)]) -> ChatMessage {
         ChatMessage {
             user_id: user_id.into(),
-            login: format!("user{user_id}"),
             display_name: format!("User{user_id}"),
             badges: badges.iter().map(|(n, v)| Badge::new(*n, *v)).collect(),
             text: text.into(),
@@ -224,7 +232,7 @@ mod tests {
         let mut g = open_giveaway();
         g.on_message(&msg("1", "YEP", &[]), &Weights::default());
         let outcome = g.on_message(&msg("1", "YEP YEP", &[]), &Weights::default());
-        assert_eq!(outcome, MessageOutcome::RolesRefreshed);
+        assert_eq!(outcome, MessageOutcome::AlreadyEntered);
         assert_eq!(ids(&g), ["1"]);
     }
 
@@ -354,6 +362,37 @@ mod tests {
     }
 
     #[test]
+    fn winner_cannot_enter_again_until_reset() {
+        let mut g = open_giveaway();
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        let mut rng = StdRng::seed_from_u64(5);
+        assert!(matches!(
+            g.draw(&Weights::default(), &mut rng),
+            DrawOutcome::Winner(_)
+        ));
+        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        assert_eq!(outcome, MessageOutcome::Ignored);
+        g.reset();
+        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        assert_eq!(outcome, MessageOutcome::Entered);
+    }
+
+    #[test]
+    fn new_rule_replaces_old_one() {
+        let mut g = open_giveaway();
+        g.set_rule(Keyword::parse("!join").unwrap(), MatchMode::Exact);
+        let weights = Weights::default();
+        assert_eq!(
+            g.on_message(&msg("1", "YEP", &[]), &weights),
+            MessageOutcome::Ignored
+        );
+        assert_eq!(
+            g.on_message(&msg("2", "!JOIN", &[]), &weights),
+            MessageOutcome::Entered
+        );
+    }
+
+    #[test]
     fn huge_weights_do_not_overflow() {
         let weights = Weights {
             pleb: u32::MAX,
@@ -368,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn counts_by_role_uses_effective_role() {
+    fn counts_by_role_counts_drawable_entrants_by_effective_role() {
         let mut g = open_giveaway();
         let weights = Weights::default();
         g.on_message(&msg("1", "YEP", &[]), &weights);
@@ -377,6 +416,8 @@ mod tests {
             &msg("3", "YEP", &[("subscriber", "3001"), ("moderator", "1")]),
             &weights,
         );
+        g.on_message(&msg("4", "YEP", &[("vip", "1")]), &weights);
+        let weights = Weights { vip: 0, ..weights };
         let counts = g.counts_by_role(&weights);
         assert_eq!(
             counts,
