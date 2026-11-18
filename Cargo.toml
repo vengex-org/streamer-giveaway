@@ -8,6 +8,8 @@ publish = false
 
 [dependencies]
 gpui-kit = "0.10"
+indexmap = "2.14.2"
+rand = "0.10.4"
 serde = { version = "1.0.229", features = ["derive"] }
 
 [lints.clippy]
