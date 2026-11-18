@@ -1,5 +1,7 @@
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// A chat badge as Twitch sends it in the `badges` tag, e.g. `subscriber/3012`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Badge {
@@ -32,7 +34,8 @@ impl ChatMessage {
 }
 
 /// Giveaway keyword: trimmed, never empty.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct Keyword {
     text: String,
     folded: String,
@@ -72,7 +75,8 @@ impl Keyword {
 }
 
 /// Twitch channel login: lowercase `[a-z0-9_]{1,25}`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct ChannelLogin(String);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +110,34 @@ impl ChannelLogin {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl TryFrom<String> for Keyword {
+    type Error = EmptyKeyword;
+
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::parse(&raw)
+    }
+}
+
+impl From<Keyword> for String {
+    fn from(keyword: Keyword) -> Self {
+        keyword.text
+    }
+}
+
+impl TryFrom<String> for ChannelLogin {
+    type Error = InvalidChannel;
+
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::parse(&raw)
+    }
+}
+
+impl From<ChannelLogin> for String {
+    fn from(channel: ChannelLogin) -> Self {
+        channel.0
     }
 }
 
