@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::{fs, io};
 
 use directories::ProjectDirs;
@@ -37,10 +37,6 @@ impl ConfigStore {
             .map(|dirs| Self::at(dirs.config_dir().join("config.toml")))
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     pub fn load(&self) -> Loaded {
         let text = match fs::read_to_string(&self.path) {
             Ok(text) => text,
@@ -54,11 +50,22 @@ impl ConfigStore {
                 config,
                 warning: None,
             },
-            Err(err) => Self::defaults(Some(format!(
-                "invalid settings in {}: {err}",
-                self.path.display()
-            ))),
+            Err(err) => Self::defaults(Some(self.set_aside_invalid(&err))),
         }
+    }
+
+    /// Moves an unreadable settings file to `<name>.bak`, so the next save does not overwrite the
+    /// user's settings with defaults.
+    fn set_aside_invalid(&self, err: &toml::de::Error) -> String {
+        let backup = self.path.with_extension("toml.bak");
+        let kept = match fs::rename(&self.path, &backup) {
+            Ok(()) => format!("kept a copy in {}", backup.display()),
+            Err(rename_err) => format!("could not keep a copy: {rename_err}"),
+        };
+        format!(
+            "invalid settings in {}, using defaults ({kept}): {err}",
+            self.path.display()
+        )
     }
 
     pub fn save(&self, config: &Config) -> Result<(), StorageError> {
@@ -70,7 +77,10 @@ impl ConfigStore {
         if let Some(dir) = self.path.parent() {
             fs::create_dir_all(dir).map_err(write_error)?;
         }
-        fs::write(&self.path, text).map_err(write_error)
+        // Write a sibling file and rename it over the old one, so a crash never leaves half a file.
+        let partial = self.path.with_extension("toml.partial");
+        fs::write(&partial, text).map_err(write_error)?;
+        fs::rename(&partial, &self.path).map_err(write_error)
     }
 
     fn defaults(warning: Option<String>) -> Loaded {
@@ -115,5 +125,31 @@ mod tests {
         assert_eq!(loaded.config, Config::default());
         let warning = loaded.warning.expect("warning for a corrupt file");
         assert!(warning.contains("config.toml"), "{warning}");
+        let backup = fs::read_to_string(dir.path().join("config.toml.bak")).unwrap();
+        assert_eq!(backup, "weights = [not toml");
+    }
+
+    #[test]
+    fn save_replaces_existing_file_without_leftovers() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ConfigStore::at(dir.path().join("config.toml"));
+        store.save(&Config::default()).unwrap();
+        let mut config = Config::default();
+        config.weights.set(Role::Vip, 9);
+        store.save(&config).unwrap();
+        assert_eq!(store.load().config.weights.get(Role::Vip), 9);
+        let files: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn save_into_unwritable_location_reports_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("not-a-dir");
+        fs::write(&blocker, "").unwrap();
+        let err = ConfigStore::at(blocker.join("config.toml"))
+            .save(&Config::default())
+            .unwrap_err();
+        assert!(err.to_string().contains("not-a-dir"), "{err}");
     }
 }
