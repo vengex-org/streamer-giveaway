@@ -1,8 +1,8 @@
 use gpui_kit::*;
+use streamer_giveaway::chat::{ChatBridge, connection_problem_layer};
+use streamer_giveaway::storage::{ConfigStore, Loaded};
+use streamer_giveaway::ui::AppView;
 use tracing_subscriber::prelude::*;
-use yep_giveaway::chat::{ChatBridge, connection_problem_layer};
-use yep_giveaway::storage::{ConfigStore, Loaded};
-use yep_giveaway::ui::AppView;
 
 fn main() {
     let (problem_layer, problems) = connection_problem_layer();
@@ -20,6 +20,10 @@ fn main() {
         .init();
 
     let store = ConfigStore::in_user_config_dir();
+    let legacy_warning = store
+        .as_ref()
+        .zip(ConfigStore::legacy_user_config_dir())
+        .and_then(|(store, legacy)| store.adopt_legacy(&legacy));
     let Loaded {
         config,
         warning,
@@ -33,13 +37,17 @@ fn main() {
         },
     };
     let store = store.filter(|_| may_save);
+    let warning = [legacy_warning, warning]
+        .into_iter()
+        .flatten()
+        .reduce(|first, second| format!("{first}\n{second}"));
     let bridge = ChatBridge::spawn(problems).expect("failed to start the chat thread");
 
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
-                title: Some("YEP giveaway".into()),
+                title: Some("Streamer Giveaway".into()),
                 ..Default::default()
             }),
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(

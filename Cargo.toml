@@ -1,5 +1,5 @@
 [package]
-name = "yep-giveaway"
+name = "streamer-giveaway"
 version = "0.1.0"
 edition = "2024"
 description = "Collect Twitch chat giveaway entries by keyword and draw a weighted winner"

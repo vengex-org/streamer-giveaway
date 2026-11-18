@@ -38,10 +38,38 @@ impl ConfigStore {
         Self { path: path.into() }
     }
 
-    /// `config.toml` in the per-user config directory, e.g. `%APPDATA%\yep-giveaway\config`.
+    /// `config.toml` in the per-user config directory, e.g. `%APPDATA%\streamer-giveaway\config`.
     pub fn in_user_config_dir() -> Option<Self> {
-        ProjectDirs::from("", "", "yep-giveaway")
-            .map(|dirs| Self::at(dirs.config_dir().join("config.toml")))
+        Self::in_named_config_dir("streamer-giveaway")
+    }
+
+    /// Where the app kept its settings while it was called yep-giveaway.
+    pub fn legacy_user_config_dir() -> Option<Self> {
+        Self::in_named_config_dir("yep-giveaway")
+    }
+
+    fn in_named_config_dir(app: &str) -> Option<Self> {
+        ProjectDirs::from("", "", app).map(|dirs| Self::at(dirs.config_dir().join("config.toml")))
+    }
+
+    /// Copies the legacy settings file here once, when this store has no file yet. The legacy file
+    /// is never changed. Returns a warning when a legacy file exists but could not be copied.
+    pub fn adopt_legacy(&self, legacy: &ConfigStore) -> Option<String> {
+        if self.path.exists() || !legacy.path.exists() {
+            return None;
+        }
+        let copied = self
+            .path
+            .parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| fs::read(&legacy.path))
+            .and_then(|bytes| fs::write(&self.path, bytes));
+        copied.err().map(|err| {
+            format!(
+                "could not take over old settings from {}: {err}",
+                legacy.path.display()
+            )
+        })
     }
 
     pub fn load(&self) -> Loaded {
@@ -128,6 +156,57 @@ impl ConfigStore {
 mod tests {
     use super::*;
     use crate::domain::role::Role;
+
+    #[test]
+    fn legacy_settings_are_copied_when_new_file_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = ConfigStore::at(dir.path().join("old").join("config.toml"));
+        let mut config = Config::default();
+        config.weights.set(Role::Vip, 7);
+        legacy.save(&config).unwrap();
+        let store = ConfigStore::at(dir.path().join("new").join("config.toml"));
+
+        assert_eq!(store.adopt_legacy(&legacy), None);
+        assert_eq!(store.load().config.weights.get(Role::Vip), 7);
+        assert!(legacy.path.exists(), "legacy file must stay");
+    }
+
+    #[test]
+    fn legacy_copy_never_overwrites_new_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = ConfigStore::at(dir.path().join("old").join("config.toml"));
+        let mut old = Config::default();
+        old.weights.set(Role::Vip, 7);
+        legacy.save(&old).unwrap();
+        let store = ConfigStore::at(dir.path().join("new").join("config.toml"));
+        store.save(&Config::default()).unwrap();
+
+        assert_eq!(store.adopt_legacy(&legacy), None);
+        assert_eq!(store.load().config, Config::default());
+    }
+
+    #[test]
+    fn missing_legacy_file_is_not_a_problem() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = ConfigStore::at(dir.path().join("old").join("config.toml"));
+        let store = ConfigStore::at(dir.path().join("new").join("config.toml"));
+        assert_eq!(store.adopt_legacy(&legacy), None);
+        assert!(!store.path.exists());
+    }
+
+    #[test]
+    fn unreadable_legacy_file_is_skipped_with_the_cause() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_path = dir.path().join("old").join("config.toml");
+        fs::create_dir_all(&legacy_path).unwrap();
+        let store = ConfigStore::at(dir.path().join("new").join("config.toml"));
+
+        let warning = store
+            .adopt_legacy(&ConfigStore::at(&legacy_path))
+            .expect("warning for an unreadable legacy file");
+        assert!(warning.contains("old"), "{warning}");
+        assert!(!store.path.exists());
+    }
 
     #[test]
     fn missing_file_gives_defaults_without_warning() {

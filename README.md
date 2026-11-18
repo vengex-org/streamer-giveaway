@@ -1,4 +1,4 @@
-# yep-giveaway
+# streamer-giveaway
 
 A small desktop app for Twitch giveaways. It reads a channel's chat (read-only, no login), adds
 everyone who types the giveaway keyword, counts each person once and draws a winner. Subs, VIPs and
