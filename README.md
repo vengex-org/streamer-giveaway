@@ -18,19 +18,21 @@ The first build takes several minutes.
 
 ## Use
 
-1. Type the channel name and press Connect. The dot turns green once the chat is joined.
+1. Type the channel name and press Connect. The dot turns green once the chat is joined. If the
+   connection fails, the reason is shown next to the dot.
 2. Set the keyword (default `YEP`) and how it has to appear:
    - **Word**: the keyword as a separate word anywhere in the message (`YEP lets go` counts, `YEPPERS` does not).
    - **Whole message**: the message is only the keyword.
    - **Contains**: the keyword anywhere, also inside other words.
 
-   Case never matters.
+   Case never matters. A new keyword takes effect when you press Enter, leave the field, switch
+   the mode or open entries, never while you are still typing.
 3. Press **Open entries**. Everyone whose message matches is added once. The broadcaster is never added.
 4. Set the tickets per role (Pleb, Sub T1/T2/T3, VIP, Mod). A chatter with several roles gets the
    highest number. Weight 0 keeps that role out: new messages do not add them, and people already in
    the list stay there but cannot win.
-5. Press **Close entries**, then **Draw winner**. The winner leaves the pool, so the next draw picks
-   someone else. **Reset** empties the list.
+5. Press **Close entries**, then **Draw winner**. The winner leaves the pool and cannot enter again,
+   so the next draw picks someone else. **Reset** empties the list and forgets past winners.
 
 A chatter's role is refreshed by each of their later messages, so a viewer who subscribes after
 entering gets the sub weight.

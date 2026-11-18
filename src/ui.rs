@@ -1,7 +1,6 @@
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::label::Label;
-use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -9,9 +8,9 @@ use gpui_kit::*;
 use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
 use crate::domain::chat::{ChannelLogin, Keyword};
 use crate::domain::config::Config;
-use crate::domain::giveaway::{DrawOutcome, Entrant, Giveaway, GiveawayState};
+use crate::domain::giveaway::{DrawOutcome, Entrant, Giveaway, GiveawayState, MessageOutcome};
 use crate::domain::matcher::MatchMode;
-use crate::domain::role::Role;
+use crate::domain::role::{Role, Weights};
 use crate::storage::ConfigStore;
 
 pub struct AppView {
@@ -80,8 +79,9 @@ impl AppView {
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             while let Ok(event) = events.recv().await {
                 let applied = this.update(cx, |view, cx| {
-                    view.on_chat_event(event);
-                    cx.notify();
+                    if view.on_chat_event(event) {
+                        cx.notify();
+                    }
                 });
                 if applied.is_err() {
                     break;
@@ -105,13 +105,20 @@ impl AppView {
         }
     }
 
-    fn on_chat_event(&mut self, event: ChatEvent) {
+    /// Applies a chat event; returns whether anything visible changed.
+    fn on_chat_event(&mut self, event: ChatEvent) -> bool {
         match event {
             ChatEvent::Message(msg) => {
-                self.giveaway.on_message(&msg, &self.config.weights);
+                self.giveaway.on_message(&msg, &self.config.weights) != MessageOutcome::Ignored
             }
-            ChatEvent::Status(status) => self.status = status,
-            ChatEvent::Rejected(reason) => self.notice = Some(reason),
+            ChatEvent::Status(status) => {
+                self.status = status;
+                true
+            }
+            ChatEvent::Rejected(reason) => {
+                self.notice = Some(reason);
+                true
+            }
         }
     }
 
@@ -129,24 +136,36 @@ impl AppView {
 
     fn on_keyword_input(
         &mut self,
-        input: &Entity<InputState>,
+        _: &Entity<InputState>,
         event: &InputEvent,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !matches!(event, InputEvent::Change) {
-            return;
+        if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+            self.commit_rule(cx);
+            cx.notify();
         }
-        match Keyword::parse(&input.read(cx).value()) {
+    }
+
+    /// Takes the keyword field's text into the giveaway rule. Called on Enter, on leaving the
+    /// field, and before opening entries or switching mode (buttons do not take focus, so the
+    /// field never blurs on a click). Never per keystroke: a half-typed keyword would let
+    /// unintended messages into an open giveaway. Returns false when the keyword is invalid.
+    fn commit_rule(&mut self, cx: &mut Context<Self>) -> bool {
+        match Keyword::parse(&self.keyword_input.read(cx).value()) {
             Ok(keyword) => {
                 self.config.keyword = keyword;
-                self.apply_rule();
+                self.giveaway
+                    .set_rule(self.config.keyword.clone(), self.config.mode);
                 self.notice = None;
                 self.save();
+                true
             }
-            Err(err) => self.notice = Some(err.to_string()),
+            Err(err) => {
+                self.notice = Some(err.to_string());
+                false
+            }
         }
-        cx.notify();
     }
 
     fn connect(&mut self, cx: &mut Context<Self>) {
@@ -175,31 +194,20 @@ impl AppView {
 
     fn set_mode(&mut self, mode: MatchMode, cx: &mut Context<Self>) {
         self.config.mode = mode;
-        self.apply_rule();
-        self.save();
+        self.commit_rule(cx);
         cx.notify();
     }
 
     fn set_weight(&mut self, role: Role, text: &str, cx: &mut Context<Self>) {
-        match text.trim().parse::<u32>() {
+        match Weights::parse_weight(text) {
             Ok(weight) => {
                 self.config.weights.set(role, weight);
                 self.notice = None;
                 self.save();
             }
-            Err(_) => {
-                self.notice = Some(format!(
-                    "weight for {} must be a whole number 0 or more",
-                    role.label()
-                ));
-            }
+            Err(err) => self.notice = Some(format!("{}: {err}", role.label())),
         }
         cx.notify();
-    }
-
-    fn apply_rule(&mut self) {
-        self.giveaway
-            .set_rule(self.config.keyword.clone(), self.config.mode);
     }
 
     fn save(&mut self) {
@@ -232,7 +240,11 @@ impl AppView {
 
     fn set_state(&mut self, state: GiveawayState, cx: &mut Context<Self>) {
         match state {
-            GiveawayState::Open => self.giveaway.open(),
+            GiveawayState::Open => {
+                if self.commit_rule(cx) {
+                    self.giveaway.open();
+                }
+            }
             GiveawayState::Closed => self.giveaway.close(),
         }
         cx.notify();
@@ -248,9 +260,13 @@ impl AppView {
         let theme = cx.theme();
         let (color, text) = match &self.status {
             ConnectionStatus::Idle => (theme.muted_foreground, "not connected".to_owned()),
-            ConnectionStatus::Connecting(c) => {
-                (theme.warning, format!("connecting to #{}", c.as_str()))
-            }
+            ConnectionStatus::Connecting { channel, cause } => (
+                theme.warning,
+                match cause {
+                    Some(cause) => format!("connecting to #{}: {cause}", channel.as_str()),
+                    None => format!("connecting to #{}", channel.as_str()),
+                },
+            ),
             ConnectionStatus::Connected(c) => (theme.success, format!("reading #{}", c.as_str())),
             ConnectionStatus::Reconnecting { channel, cause } => (
                 theme.danger,
@@ -371,18 +387,34 @@ impl AppView {
 
     fn render_entrants(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let rows = self.giveaway.entrants().enumerate().map(|(i, entrant)| {
-            let (role, weight) = entrant.effective(&self.config.weights);
-            h_flex()
-                .px_2()
-                .py_1()
-                .gap_2()
-                .when(i % 2 == 1, |row| row.bg(theme.list_even))
-                .when(weight == 0, |row| row.text_color(theme.muted_foreground))
-                .child(div().flex_1().child(entrant.display_name.clone()))
-                .child(div().w(px(80.)).child(role.label()))
-                .child(div().w(px(60.)).text_right().child(weight.to_string()))
-        });
+        // Only the visible rows are built: a big chat can bring thousands of entrants.
+        let rows = uniform_list(
+            "entrants",
+            self.giveaway.entrants().len(),
+            cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
+                let theme = cx.theme();
+                this.giveaway
+                    .entrants()
+                    .enumerate()
+                    .skip(range.start)
+                    .take(range.len())
+                    .map(|(i, entrant)| {
+                        let (role, weight) = entrant.effective(&this.config.weights);
+                        h_flex()
+                            .w_full()
+                            .px_2()
+                            .py_1()
+                            .gap_2()
+                            .when(i % 2 == 1, |row| row.bg(theme.list_even))
+                            .when(weight == 0, |row| row.text_color(theme.muted_foreground))
+                            .child(div().flex_1().child(entrant.display_name.clone()))
+                            .child(div().w(px(80.)).child(role.label()))
+                            .child(div().w(px(60.)).text_right().child(weight.to_string()))
+                    })
+                    .collect::<Vec<_>>()
+            }),
+        )
+        .flex_1();
         v_flex()
             .flex_1()
             .min_h_0()
@@ -406,13 +438,7 @@ impl AppView {
                     .child(div().w(px(80.)).child("Role"))
                     .child(div().w(px(60.)).text_right().child("Tickets")),
             )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scrollbar()
-                    .children(rows),
-            )
+            .child(rows)
     }
 
     fn render_draw(&self, cx: &mut Context<Self>) -> impl IntoElement {
