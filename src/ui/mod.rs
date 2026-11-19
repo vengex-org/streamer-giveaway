@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::*;
 use rust_i18n::t;
 
@@ -23,6 +24,7 @@ use crate::domain::stats::ChatStats;
 use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
 use crate::storage::{self, ConfigStore};
+use header::{LanguageOption, language_options};
 use palette::Palette;
 use stage::{Stage, TICK};
 
@@ -91,6 +93,7 @@ pub struct AppView {
     keyword_input: Entity<InputState>,
     weight_inputs: Vec<(Role, Entity<InputState>)>,
     window_input: Entity<InputState>,
+    language_select: Entity<SelectState<Vec<LanguageOption>>>,
     entrants_scroll: UniformListScrollHandle,
     ticker: Option<Task<()>>,
     /// Throughput while entries are open.
@@ -141,6 +144,13 @@ impl AppView {
             })
             .collect();
 
+        let chosen_language = config.language;
+        let language_select = cx.new(|cx| {
+            let mut state = SelectState::new(language_options(), None, window, cx);
+            state.set_selected_value(&chosen_language, window, cx);
+            state
+        });
+
         let window_amount = config.eligibility.active_window.amount.to_string();
         let window_input = cx.new(|cx| InputState::new(window, cx).default_value(window_amount));
 
@@ -150,6 +160,12 @@ impl AppView {
                     let text = input.read(cx).value();
                     this.set_window_amount(&text, cx);
                 }
+            }),
+            cx.subscribe_in(&language_select, window, |this, _, event, window, cx| {
+                let SelectEvent::Confirm(Some(choice)) = event else {
+                    return;
+                };
+                this.set_language(*choice, window, cx);
             }),
             cx.subscribe_in(&channel_input, window, Self::on_channel_input),
             cx.subscribe_in(&keyword_input, window, Self::on_keyword_input),
@@ -207,6 +223,7 @@ impl AppView {
             keyword_input,
             weight_inputs,
             window_input,
+            language_select,
             entrants_scroll: UniformListScrollHandle::new(),
             ticker: None,
             stats: ChatStats::default(),
@@ -572,6 +589,11 @@ impl AppView {
         });
         self.keyword_input.update(cx, |input, cx| {
             input.set_placeholder(t!("step.keyword.placeholder"), window, cx)
+        });
+        // "Auto" is labeled in the UI language, so the items are rebuilt with the new texts.
+        self.language_select.update(cx, |select, cx| {
+            select.set_items(language_options(), window, cx);
+            select.set_selected_value(&language, window, cx);
         });
         cx.notify();
     }

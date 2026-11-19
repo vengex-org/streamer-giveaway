@@ -66,10 +66,10 @@ cs = "Tmavý"
 es = "Oscuro"
 
 [header.lang_auto]
-sk = "Auto"
-en = "Auto"
-cs = "Auto"
-es = "Auto"
+sk = "Auto (podľa systému)"
+en = "Auto (system)"
+cs = "Auto (podle systému)"
+es = "Auto (sistema)"
 
 # Steps column
 

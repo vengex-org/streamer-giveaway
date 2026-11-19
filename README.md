@@ -1,3 +1,5 @@
+<img src="docs/icon.png" width="96" alt="">
+
 # Streamer Giveaway
 
 A desktop app for Twitch chat giveaways. Viewers enter by typing a keyword in chat, the app counts
@@ -25,7 +27,8 @@ browser source.
   a button you cannot press yet says why. The Rules step always shows who can enter and how many
   tickets each group gets, so you don't have to look for them.
 - There is a dark and a light theme, and the app speaks English, Slovak, Czech and Spanish. Both
-  follow your system settings until you pick one, and "Auto" or "System" goes back to that.
+  follow your system settings until you pick one in the header, and "Auto" or "System" goes back
+  to that.
 
 | Entries coming in | Winner answered | Editing the rules, light theme |
 |---|---|---|

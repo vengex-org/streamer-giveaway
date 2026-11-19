@@ -1,4 +1,5 @@
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::select::{Select, SelectItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use rust_i18n::t;
@@ -6,6 +7,39 @@ use rust_i18n::t;
 use super::AppView;
 use crate::chat::ConnectionStatus;
 use crate::domain::prefs::{Language, ThemeChoice};
+use crate::i18n;
+
+/// One row of the language select. `None` follows the OS language.
+#[derive(Debug, Clone)]
+pub(super) struct LanguageOption {
+    choice: Option<Language>,
+    title: SharedString,
+}
+
+impl SelectItem for LanguageOption {
+    type Value = Option<Language>;
+
+    fn title(&self) -> SharedString {
+        self.title.clone()
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.choice
+    }
+}
+
+/// "Auto" first, labeled in the current UI language, then each language in its own name.
+pub(super) fn language_options() -> Vec<LanguageOption> {
+    let auto = LanguageOption {
+        choice: None,
+        title: t!("header.lang_auto").into_owned().into(),
+    };
+    let languages = Language::ALL.iter().map(|&language| LanguageOption {
+        choice: Some(language),
+        title: i18n::language_name(language).into(),
+    });
+    std::iter::once(auto).chain(languages).collect()
+}
 
 impl AppView {
     pub(super) fn render_header(&self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -40,23 +74,6 @@ impl AppView {
             ),
         };
 
-        let chosen_language = self.config.language;
-        let auto_language = Button::new("lang-auto")
-            .xsmall()
-            .ghost()
-            .label(t!("header.lang_auto").into_owned())
-            .selected(chosen_language.is_none())
-            .on_click(cx.listener(|this, _, window, cx| this.set_language(None, window, cx)));
-        let languages = Language::ALL.iter().map(|&language| {
-            Button::new(SharedString::from(format!("lang-{}", language.code())))
-                .xsmall()
-                .ghost()
-                .label(language.code().to_uppercase())
-                .selected(chosen_language == Some(language))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.set_language(Some(language), window, cx)
-                }))
-        });
         let chosen_theme = self.config.theme;
         let themes = [
             (None, t!("header.theme.system")),
@@ -102,7 +119,15 @@ impl AppView {
                     ),
             )
             .child(div().flex_1())
-            .child(h_flex().gap_1().child(auto_language).children(languages))
+            // The select fills its parent, so a fixed box keeps it from taking the header's room.
+            .child(
+                div().flex_none().w(px(190.)).child(
+                    Select::new(&self.language_select)
+                        .id("language")
+                        .small()
+                        .w_full(),
+                ),
+            )
             .child(div().w(px(1.)).h(px(16.)).bg(p.border))
             .child(h_flex().gap_1().children(themes))
     }

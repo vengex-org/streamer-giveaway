@@ -32,6 +32,16 @@ pub fn apply(language: Language) {
     rust_i18n::set_locale(language.code());
 }
 
+/// A language's name in that language, so people find their own whatever the UI shows now.
+pub fn language_name(language: Language) -> &'static str {
+    match language {
+        Language::Sk => "Slovenčina",
+        Language::En => "English",
+        Language::Cs => "Čeština",
+        Language::Es => "Español",
+    }
+}
+
 pub fn role_label(role: Role) -> String {
     match role {
         Role::Pleb => t!("role.pleb"),
