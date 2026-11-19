@@ -46,14 +46,12 @@ login or a browser source.
   follow your system settings until you pick one in the header, and "Auto" or "System" goes back
   to that.
 
-| Entries coming in (8000-viewer demo) | Winner answered | Rules and search, light theme |
+| Entries from Twitch, Kick and YouTube | Winner answered | Rules and search, light theme |
 |---|---|---|
 | ![Entries](docs/entries-dark.png) | ![Winner](docs/winner-dark.png) | ![Rules and search](docs/rules-search-light.png) |
 
-Multistream: Twitch, Kick and YouTube chats feed one giveaway, and each entrant shows the logo of
-their chat.
-
-![Multistream with three chats](docs/multistream-dark.png)
+In Multistream, Twitch, Kick and YouTube chats feed one giveaway, and each entrant shows the logo
+of their chat.
 
 ## Try it without a stream
 
