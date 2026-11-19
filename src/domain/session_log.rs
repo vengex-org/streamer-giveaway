@@ -87,12 +87,19 @@ impl SessionLog {
     }
 }
 
-/// Quotes a CSV field when it holds a comma, quote or line break (RFC 4180).
+/// Quotes a CSV field when it holds a comma, quote or line break (RFC 4180). A field that a
+/// spreadsheet would read as a formula (`=`, `+`, `-`, `@`, tab) gets a leading `'`, so opening the
+/// log in Excel never runs anything a chatter typed into their name.
 fn csv_field(value: &str) -> String {
+    let value = if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{value}")
+    } else {
+        value.to_owned()
+    };
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
-        value.to_owned()
+        value
     }
 }
 
@@ -132,6 +139,17 @@ mod tests {
             "{}",
             log.to_csv()
         );
+    }
+
+    #[test]
+    fn values_a_spreadsheet_would_run_as_formulas_are_neutralised() {
+        let start = Instant::now();
+        let mut log = SessionLog::new(start);
+        log.record(start, LogKind::Chat, "1", "=HYPERLINK(\"x\")");
+        log.record(start, LogKind::Chat, "2", "@cmd");
+        let csv = log.to_csv();
+        assert!(csv.contains("0,chat,1,\"'=HYPERLINK(\"\"x\"\")\""), "{csv}");
+        assert!(csv.contains("0,chat,2,'@cmd"), "{csv}");
     }
 
     #[test]
