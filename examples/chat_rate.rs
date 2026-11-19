@@ -2,7 +2,9 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use streamer_giveaway::chat::{ChatBridge, ChatCommand, ChatEvent, connection_problem_layer};
+use streamer_giveaway::chat::{
+    ChatBridge, ChatCommand, ChatEvent, ChatTarget, connection_problem_layer,
+};
 use streamer_giveaway::domain::chat::ChannelLogin;
 
 fn main() {
@@ -15,7 +17,9 @@ fn main() {
     let bridge = ChatBridge::spawn(problems).unwrap();
     bridge
         .commands
-        .send_blocking(ChatCommand::Join(ChannelLogin::parse(&channel).unwrap()))
+        .send_blocking(ChatCommand::Join(ChatTarget::Twitch(
+            ChannelLogin::parse(&channel).unwrap(),
+        )))
         .unwrap();
     let mut start = None;
     let mut per_sec: HashMap<u64, u32> = HashMap::new();

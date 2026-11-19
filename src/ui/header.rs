@@ -7,7 +7,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use super::{AppView, Page, RunMode};
-use crate::chat::ConnectionStatus;
+use crate::chat::{ConnectionStatus, FailReason};
 use crate::domain::prefs::{Language, ThemeChoice};
 use crate::i18n;
 
@@ -48,31 +48,39 @@ impl AppView {
         let p = self.palette;
         let (dot, status) = match &self.status {
             ConnectionStatus::Idle => (p.muted, t!("header.status.idle")),
-            ConnectionStatus::Connecting { channel, cause } => (
+            ConnectionStatus::Connecting { target, cause } => (
                 p.accent,
                 match cause {
                     Some(cause) => t!(
                         "header.status.connecting_cause",
-                        channel = channel.as_str(),
+                        channel = target.label(),
                         cause = cause
                     ),
-                    None => t!("header.status.connecting", channel = channel.as_str()),
+                    None => t!("header.status.connecting", channel = target.label()),
                 },
             ),
-            ConnectionStatus::Connected(channel) => (
+            ConnectionStatus::Connected(target) => (
                 p.success,
-                t!("header.status.connected", channel = channel.as_str()),
+                t!("header.status.connected", channel = target.label()),
             ),
-            ConnectionStatus::Reconnecting { channel, cause } => (
+            ConnectionStatus::Reconnecting { target, cause } => (
                 p.danger,
                 match cause {
                     Some(cause) => t!(
                         "header.status.reconnecting_cause",
-                        channel = channel.as_str(),
+                        channel = target.label(),
                         cause = cause
                     ),
-                    None => t!("header.status.reconnecting", channel = channel.as_str()),
+                    None => t!("header.status.reconnecting", channel = target.label()),
                 },
+            ),
+            ConnectionStatus::Failed { target, reason } => (
+                p.danger,
+                t!(
+                    "header.status.failed",
+                    channel = target.label(),
+                    reason = fail_reason(reason)
+                ),
             ),
         };
 
@@ -182,4 +190,15 @@ impl AppView {
             )
             .child(theme)
     }
+}
+
+/// Why a chat cannot be read, in the UI language.
+pub(super) fn fail_reason(reason: &FailReason) -> String {
+    match reason {
+        FailReason::NotFound => t!("status.fail.not_found"),
+        FailReason::Offline => t!("status.fail.offline"),
+        FailReason::Blocked => t!("status.fail.blocked"),
+        FailReason::Protocol(detail) => t!("status.fail.protocol", detail = detail),
+    }
+    .into_owned()
 }

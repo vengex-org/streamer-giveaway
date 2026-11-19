@@ -12,14 +12,14 @@ use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::*;
 use rust_i18n::t;
 
-use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
+use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ChatTarget, ConnectionStatus};
 use crate::domain::badges::{self, BadgeUrl};
 use crate::domain::chat::{ChannelLogin, Keyword};
 use crate::domain::config::Config;
 use crate::domain::eligibility::{ActiveWindow, Eligibility, TimeUnit};
 use crate::domain::giveaway::{DrawOutcome, Giveaway, GiveawayState, MessageOutcome};
 use crate::domain::matcher::MatchMode;
-use crate::domain::platform::UserKey;
+use crate::domain::platform::{Platform, UserKey};
 use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
 use crate::domain::role::{Role, Weights};
 use crate::domain::session_log::{self, LogKind, SessionLog};
@@ -335,10 +335,13 @@ impl AppView {
                 let replied = self.stage.on_message(&msg, now);
                 outcome != MessageOutcome::Ignored || replied
             }
-            ChatEvent::Status(status) => {
-                if let ConnectionStatus::Connected(channel) = &status {
-                    let joined =
-                        !matches!(&self.status, ConnectionStatus::Connected(c) if c == channel);
+            // Only Twitch until the UI shows one status per platform.
+            ChatEvent::Status(Platform::Twitch, status) => {
+                if let ConnectionStatus::Connected(ChatTarget::Twitch(channel)) = &status {
+                    let joined = !matches!(
+                        &self.status,
+                        ConnectionStatus::Connected(ChatTarget::Twitch(c)) if c == channel
+                    );
                     if joined {
                         self.load_badges(channel.clone(), cx);
                     }
@@ -346,6 +349,7 @@ impl AppView {
                 self.status = status;
                 true
             }
+            ChatEvent::Status(Platform::Kick | Platform::YouTube, _) => false,
             ChatEvent::Rejected(reason) => {
                 self.set_notice(NoticeSource::Chat, Some(Notice::ChatRejected(reason)));
                 true
@@ -419,7 +423,7 @@ impl AppView {
         let raw = self.channel_input.read(cx).value();
         match ChannelLogin::parse(&raw) {
             Ok(channel) => {
-                self.send(ChatCommand::Join(channel.clone()));
+                self.send(ChatCommand::Join(ChatTarget::Twitch(channel.clone())));
                 self.config.channel = Some(channel);
                 self.set_notice(NoticeSource::Channel, None);
                 self.set_notice(NoticeSource::Chat, None);
@@ -434,7 +438,7 @@ impl AppView {
     }
 
     fn disconnect(&mut self, cx: &mut Context<Self>) {
-        self.send(ChatCommand::Leave);
+        self.send(ChatCommand::Leave(Platform::Twitch));
         cx.notify();
     }
 

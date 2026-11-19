@@ -307,22 +307,24 @@ fn run(
     loop {
         while let Ok(command) = commands.try_recv() {
             match command {
-                ChatCommand::Join(channel) => {
-                    let connected = send(ChatEvent::Status(ConnectionStatus::Connecting {
-                        channel: channel.clone(),
+                ChatCommand::Join(target) => {
+                    let platform = target.platform();
+                    let connecting = ConnectionStatus::Connecting {
+                        target: target.clone(),
                         cause: None,
-                    }));
+                    };
+                    let connected = send(ChatEvent::Status(platform, connecting));
                     thread::sleep(Duration::from_millis(600));
-                    if !connected || !send(ChatEvent::Status(ConnectionStatus::Connected(channel)))
-                    {
+                    let joined = ChatEvent::Status(platform, ConnectionStatus::Connected(target));
+                    if !connected || !send(joined) {
                         return;
                     }
                     started = Some(Instant::now());
                     next = 0;
                 }
-                ChatCommand::Leave => {
+                ChatCommand::Leave(platform) => {
                     started = None;
-                    if !send(ChatEvent::Status(ConnectionStatus::Idle)) {
+                    if !send(ChatEvent::Status(platform, ConnectionStatus::Idle)) {
                         return;
                     }
                 }

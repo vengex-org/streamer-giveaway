@@ -18,34 +18,34 @@ cs = "Nepřipojeno"
 es = "Sin conexión"
 
 [header.status.connecting]
-sk = "Pripájam sa k #%{channel}…"
-en = "Connecting to #%{channel}…"
-cs = "Připojuji se k #%{channel}…"
-es = "Conectando a #%{channel}…"
+sk = "Pripájam sa k %{channel}…"
+en = "Connecting to %{channel}…"
+cs = "Připojuji se k %{channel}…"
+es = "Conectando a %{channel}…"
 
 [header.status.connecting_cause]
-sk = "Pripájam sa k #%{channel}: %{cause}"
-en = "Connecting to #%{channel}: %{cause}"
-cs = "Připojuji se k #%{channel}: %{cause}"
-es = "Conectando a #%{channel}: %{cause}"
+sk = "Pripájam sa k %{channel}: %{cause}"
+en = "Connecting to %{channel}: %{cause}"
+cs = "Připojuji se k %{channel}: %{cause}"
+es = "Conectando a %{channel}: %{cause}"
 
 [header.status.connected]
-sk = "Čítam chat #%{channel}"
-en = "Reading #%{channel} chat"
-cs = "Čtu chat #%{channel}"
-es = "Leyendo el chat de #%{channel}"
+sk = "Čítam chat %{channel}"
+en = "Reading %{channel} chat"
+cs = "Čtu chat %{channel}"
+es = "Leyendo el chat de %{channel}"
 
 [header.status.reconnecting]
-sk = "Spojenie s #%{channel} sa prerušilo, pripájam znova…"
-en = "Connection to #%{channel} dropped, reconnecting…"
-cs = "Spojení s #%{channel} se přerušilo, připojuji znovu…"
-es = "Se cortó la conexión con #%{channel}, reconectando…"
+sk = "Spojenie s %{channel} sa prerušilo, pripájam znova…"
+en = "Connection to %{channel} dropped, reconnecting…"
+cs = "Spojení s %{channel} se přerušilo, připojuji znovu…"
+es = "Se cortó la conexión con %{channel}, reconectando…"
 
 [header.status.reconnecting_cause]
-sk = "Spojenie s #%{channel} sa prerušilo, pripájam znova: %{cause}"
-en = "Connection to #%{channel} dropped, reconnecting: %{cause}"
-cs = "Spojení s #%{channel} se přerušilo, připojuji znovu: %{cause}"
-es = "Se cortó la conexión con #%{channel}, reconectando: %{cause}"
+sk = "Spojenie s %{channel} sa prerušilo, pripájam znova: %{cause}"
+en = "Connection to %{channel} dropped, reconnecting: %{cause}"
+cs = "Spojení s %{channel} se přerušilo, připojuji znovu: %{cause}"
+es = "Se cortó la conexión con %{channel}, reconectando: %{cause}"
 
 [header.theme.system]
 sk = "Systém"
@@ -718,3 +718,35 @@ sk = "Demo sa nepodarilo spustiť: %{cause}"
 en = "Could not start the demo: %{cause}"
 cs = "Demo se nepodařilo spustit: %{cause}"
 es = "No se pudo iniciar la demo: %{cause}"
+
+# Chat that cannot be read
+
+[header.status.failed]
+sk = "Chat %{channel} sa nedá čítať: %{reason}"
+en = "Cannot read the %{channel} chat: %{reason}"
+cs = "Chat %{channel} nejde číst: %{reason}"
+es = "No se puede leer el chat de %{channel}: %{reason}"
+
+[status.fail.not_found]
+sk = "kanál neexistuje"
+en = "the channel does not exist"
+cs = "kanál neexistuje"
+es = "el canal no existe"
+
+[status.fail.offline]
+sk = "stream práve nebeží"
+en = "the stream is not live"
+cs = "stream právě neběží"
+es = "el directo no está en vivo"
+
+[status.fail.blocked]
+sk = "platforma pripojenie zablokovala"
+en = "the platform blocked the connection"
+cs = "platforma připojení zablokovala"
+es = "la plataforma bloqueó la conexión"
+
+[status.fail.protocol]
+sk = "neočakávaná odpoveď (%{detail})"
+en = "unexpected answer (%{detail})"
+cs = "neočekávaná odpověď (%{detail})"
+es = "respuesta inesperada (%{detail})"
