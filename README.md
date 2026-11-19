@@ -1,8 +1,13 @@
 # streamer-giveaway
 
-A small desktop app for Twitch giveaways. It reads a channel's chat (read-only, no login), adds
-everyone who types the giveaway keyword, counts each person once and draws a winner. Subs, VIPs and
-mods can get more tickets than regular viewers.
+A desktop app for chat giveaways on Twitch. It reads your channel's chat (read-only, no login),
+adds everyone who types the keyword, counts each person once and draws a winner. Subs, VIPs and
+mods can get extra tickets. After the draw it shows how long the winner takes to answer and what
+they write in chat.
+
+The window is meant to be shown on stream: large keyword, entrant count and winner name, a short
+reveal when drawing, dark and light theme. The app speaks Slovak, English, Czech and Spanish and
+starts in your system's language and theme.
 
 Built with Rust and [GPUI](https://gpui.rs) through [gpui-kit](https://github.com/longbridge/gpui-kit).
 
@@ -18,27 +23,30 @@ The first build takes several minutes.
 
 ## Use
 
-1. Type the channel name and press Connect. The dot turns green once the chat is joined. If the
-   connection fails, the reason is shown next to the dot.
-2. Set the keyword (default `YEP`) and how it has to appear:
-   - **Word**: the keyword as a separate word anywhere in the message (`YEP lets go` counts, `YEPPERS` does not).
+The left column walks you through four steps; the next one is highlighted.
+
+1. **Connect**: type your Twitch channel name and press Connect. The header shows when the chat is
+   read, or why the connection failed.
+2. **Keyword**: type the word viewers have to write and press Enter. Pick how it must appear:
+   - **Word**: as a separate word anywhere in the message.
    - **Whole message**: the message is only the keyword.
-   - **Contains**: the keyword anywhere, also inside other words.
+   - **Contains**: anywhere, also inside other words.
 
-   Case never matters. A new keyword takes effect when you press Enter, leave the field, switch
-   the mode or open entries, never while you are still typing.
-3. Press **Open entries**. Everyone whose message matches is added once. The broadcaster is never added.
-4. Set the tickets per role (Pleb, Sub T1/T2/T3, VIP, Mod). A chatter with several roles gets the
-   highest number. Weight 0 keeps that role out: new messages do not add them, and people already in
-   the list stay there but cannot win.
-5. Press **Close entries**, then **Draw winner**. The winner leaves the pool and cannot enter again,
-   so the next draw picks someone else. **Reset** empties the list and forgets past winners.
+   Case never matters. Two optional sections sit under the keyword:
+   - **Bonus tickets**: tickets per role (viewer, sub tier 1/2/3, VIP, moderator). More tickets,
+     bigger chance. 0 keeps that group out. A chatter with several roles gets the highest number.
+   - **Who can enter**: only subscribers, and/or only people who wrote something other than the
+     keyword in the last N minutes or hours. Activity counts from when the app connected. People
+     who miss a condition are left out quietly.
+3. **Open entries**: everyone whose message matches is added once. The broadcaster is never added.
+4. **Draw**: entries close and names flash for a moment before the winner shows. A stopwatch runs
+   until the winner writes in chat; their messages appear below. **Draw another** picks someone
+   else (a winner cannot enter again), **Done** goes back to the list. **Clear list** removes
+   everyone and forgets past winners.
 
-A chatter's role is refreshed by each of their later messages, so a viewer who subscribes after
-entering gets the sub weight.
-
-Settings (channel, keyword, mode, weights) are saved to `%APPDATA%\streamer-giveaway\config\config.toml`
-on Windows, or to the platform's config directory elsewhere. Entrants are not saved.
+Settings (channel, keyword, mode, tickets, conditions, language, theme) are saved to
+`%APPDATA%\streamer-giveaway\config\config.toml` on Windows, or to the platform's config directory
+elsewhere. Settings from the older yep-giveaway app are taken over once.
 
 ## Development
 
@@ -48,5 +56,9 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-`src/domain` holds the giveaway rules without UI or IO. `src/chat.rs` runs the Twitch connection on
-its own thread, and `src/ui.rs` is the window.
+- `src/domain` holds the giveaway rules without UI or IO.
+- `src/chat.rs` runs the Twitch connection on its own thread.
+- `src/ui/` is the window: `steps.rs` (left column), `stage.rs` (what viewers see), `header.rs`,
+  `palette.rs` (colors for both themes).
+- Texts live in `locales/app.toml`; a test fails when a language is missing or a UI string is not
+  translated.
