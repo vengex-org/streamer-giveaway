@@ -1,0 +1,499 @@
+mod header;
+mod palette;
+mod stage;
+mod steps;
+
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::*;
+use rust_i18n::t;
+
+use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
+use crate::domain::chat::{ChannelLogin, Keyword};
+use crate::domain::config::Config;
+use crate::domain::giveaway::{DrawOutcome, Giveaway, GiveawayState, MessageOutcome};
+use crate::domain::matcher::MatchMode;
+use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
+use crate::domain::role::{Role, Weights};
+use crate::domain::winner::{WaitState, WinnerWatch};
+use crate::i18n;
+use crate::storage::ConfigStore;
+use palette::Palette;
+use stage::Stage;
+
+/// How often the stage ticker runs while a draw is shown: one reveal frame, and often enough for
+/// a stopwatch that changes once per second.
+const TICK: Duration = Duration::from_millis(100);
+
+/// What a notice is about. Each source replaces or clears only its own notice, so fixing one
+/// problem never hides another that still exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum NoticeSource {
+    Startup,
+    Save,
+    Chat,
+    Channel,
+    Keyword,
+    Weight(Role),
+}
+
+/// A problem to show, kept untranslated so a language switch re-renders it.
+#[derive(Debug, Clone)]
+enum Notice {
+    Startup(String),
+    Save(String),
+    ChatStopped,
+    ChatRejected(String),
+    ChannelInvalid(String),
+    KeywordEmpty,
+    WeightInvalid(Role),
+}
+
+impl Notice {
+    fn text(&self) -> String {
+        match self {
+            Notice::Startup(cause) => t!("error.startup", cause = cause),
+            Notice::Save(cause) => t!("error.save", cause = cause),
+            Notice::ChatStopped => t!("error.chat_stopped"),
+            Notice::ChatRejected(cause) => t!("error.chat_rejected", cause = cause),
+            Notice::ChannelInvalid(raw) => t!("error.channel_invalid", raw = raw),
+            Notice::KeywordEmpty => t!("error.keyword_empty"),
+            Notice::WeightInvalid(role) => {
+                t!("error.weight_invalid", role = i18n::role_label(*role))
+            }
+        }
+        .into_owned()
+    }
+}
+
+pub struct AppView {
+    config: Config,
+    store: Option<ConfigStore>,
+    giveaway: Giveaway,
+    commands: async_channel::Sender<ChatCommand>,
+    status: ConnectionStatus,
+    notices: BTreeMap<NoticeSource, Notice>,
+    stage: Stage,
+    bonus_open: bool,
+    os_dark: bool,
+    palette: Palette,
+    channel_input: Entity<InputState>,
+    keyword_input: Entity<InputState>,
+    weight_inputs: Vec<(Role, Entity<InputState>)>,
+    entrants_scroll: UniformListScrollHandle,
+    ticker: Option<Task<()>>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl AppView {
+    pub fn new(
+        bridge: ChatBridge,
+        store: Option<ConfigStore>,
+        config: Config,
+        startup_notice: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        i18n::apply(config.language.unwrap_or_else(i18n::os_language));
+        let os_dark = is_dark(window.appearance());
+        let theme = effective_theme(config.theme, os_dark);
+        let palette = Palette::for_theme(theme);
+        Palette::apply(theme, window, cx);
+
+        let channel = config.channel.as_ref().map(|c| c.as_str().to_owned());
+        let channel_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("step.connect.placeholder"))
+                .default_value(channel.unwrap_or_default())
+        });
+        let keyword_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("step.keyword.placeholder"))
+                .default_value(config.keyword.as_str().to_owned())
+        });
+        let weight_inputs: Vec<_> = Role::ALL
+            .iter()
+            .map(|&role| {
+                let weight = config.weights.get(role).to_string();
+                (
+                    role,
+                    cx.new(|cx| InputState::new(window, cx).default_value(weight)),
+                )
+            })
+            .collect();
+
+        let mut subscriptions = vec![
+            cx.subscribe_in(&channel_input, window, Self::on_channel_input),
+            cx.subscribe_in(&keyword_input, window, Self::on_keyword_input),
+            cx.observe_window_appearance(window, |this, window, cx| {
+                this.os_dark = is_dark(window.appearance());
+                this.apply_theme(window, cx);
+            }),
+        ];
+        for (role, input) in &weight_inputs {
+            let role = *role;
+            subscriptions.push(
+                cx.subscribe_in(input, window, move |this, input, event, _, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        let text = input.read(cx).value();
+                        this.set_weight(role, &text, cx);
+                    }
+                }),
+            );
+        }
+
+        let events = bridge.events.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            while let Ok(event) = events.recv().await {
+                let applied = this.update(cx, |view, cx| {
+                    if view.on_chat_event(event) {
+                        cx.notify();
+                    }
+                });
+                if applied.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        Self {
+            giveaway: Giveaway::new(config.keyword.clone(), config.mode),
+            config,
+            store,
+            commands: bridge.commands,
+            status: ConnectionStatus::Idle,
+            notices: startup_notice
+                .map(|cause| (NoticeSource::Startup, Notice::Startup(cause)))
+                .into_iter()
+                .collect(),
+            stage: Stage::List,
+            bonus_open: false,
+            os_dark,
+            palette,
+            channel_input,
+            keyword_input,
+            weight_inputs,
+            entrants_scroll: UniformListScrollHandle::new(),
+            ticker: None,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    fn language(&self) -> Language {
+        self.config.language.unwrap_or_else(i18n::os_language)
+    }
+
+    fn theme(&self) -> ThemeChoice {
+        effective_theme(self.config.theme, self.os_dark)
+    }
+
+    /// Entrants who can still win (weight above 0).
+    fn can_win(&self) -> usize {
+        self.giveaway
+            .counts_by_role(&self.config.weights)
+            .iter()
+            .map(|(_, n)| n)
+            .sum()
+    }
+
+    /// Applies a chat event; returns whether anything visible changed.
+    fn on_chat_event(&mut self, event: ChatEvent) -> bool {
+        match event {
+            ChatEvent::Message(msg) => {
+                let entered =
+                    self.giveaway.on_message(&msg, &self.config.weights) != MessageOutcome::Ignored;
+                let replied = match &mut self.stage {
+                    Stage::Winner { watch, .. } => watch.on_message(&msg, Instant::now()),
+                    _ => false,
+                };
+                entered || replied
+            }
+            ChatEvent::Status(status) => {
+                self.status = status;
+                true
+            }
+            ChatEvent::Rejected(reason) => {
+                self.set_notice(NoticeSource::Chat, Some(Notice::ChatRejected(reason)));
+                true
+            }
+        }
+    }
+
+    fn on_channel_input(
+        &mut self,
+        _: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(event, InputEvent::PressEnter { .. }) {
+            self.connect(cx);
+        }
+    }
+
+    fn on_keyword_input(
+        &mut self,
+        _: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                self.commit_rule(self.config.mode, cx);
+            }
+            // Only the step highlight depends on the pending text; the rule waits for Enter.
+            InputEvent::Change => {}
+            _ => return,
+        }
+        cx.notify();
+    }
+
+    /// Takes the keyword field's text and `mode` into the giveaway rule. Called on Enter, on
+    /// leaving the field, and before opening entries or switching mode (buttons do not take
+    /// focus, so the field never blurs on a click). Never per keystroke: a half-typed keyword
+    /// would let unintended messages into an open giveaway. Returns false when the keyword is
+    /// invalid; then nothing changes.
+    fn commit_rule(&mut self, mode: MatchMode, cx: &mut Context<Self>) -> bool {
+        let Ok(keyword) = Keyword::parse(&self.keyword_input.read(cx).value()) else {
+            self.set_notice(NoticeSource::Keyword, Some(Notice::KeywordEmpty));
+            return false;
+        };
+        self.set_notice(NoticeSource::Keyword, None);
+        if keyword != self.config.keyword || mode != self.config.mode {
+            self.config.keyword = keyword;
+            self.config.mode = mode;
+            self.giveaway
+                .set_rule(self.config.keyword.clone(), self.config.mode);
+            self.save();
+        }
+        true
+    }
+
+    fn keyword_text_valid(&self, cx: &App) -> bool {
+        Keyword::parse(&self.keyword_input.read(cx).value()).is_ok()
+    }
+
+    fn set_notice(&mut self, source: NoticeSource, notice: Option<Notice>) {
+        match notice {
+            Some(notice) => self.notices.insert(source, notice),
+            None => self.notices.remove(&source),
+        };
+    }
+
+    fn connect(&mut self, cx: &mut Context<Self>) {
+        let raw = self.channel_input.read(cx).value();
+        match ChannelLogin::parse(&raw) {
+            Ok(channel) => {
+                self.send(ChatCommand::Join(channel.clone()));
+                self.config.channel = Some(channel);
+                self.set_notice(NoticeSource::Channel, None);
+                self.set_notice(NoticeSource::Chat, None);
+                self.save();
+            }
+            Err(_) => self.set_notice(
+                NoticeSource::Channel,
+                Some(Notice::ChannelInvalid(raw.to_string())),
+            ),
+        }
+        cx.notify();
+    }
+
+    fn disconnect(&mut self, cx: &mut Context<Self>) {
+        self.send(ChatCommand::Leave);
+        cx.notify();
+    }
+
+    fn send(&mut self, command: ChatCommand) {
+        if self.commands.try_send(command).is_err() {
+            self.set_notice(NoticeSource::Chat, Some(Notice::ChatStopped));
+        }
+    }
+
+    fn set_mode(&mut self, mode: MatchMode, cx: &mut Context<Self>) {
+        self.commit_rule(mode, cx);
+        cx.notify();
+    }
+
+    fn set_weight(&mut self, role: Role, text: &str, cx: &mut Context<Self>) {
+        match Weights::parse_weight(text) {
+            Ok(weight) => {
+                self.set_notice(NoticeSource::Weight(role), None);
+                if self.config.weights.get(role) != weight {
+                    self.config.weights.set(role, weight);
+                    self.save();
+                }
+            }
+            Err(_) => self.set_notice(
+                NoticeSource::Weight(role),
+                Some(Notice::WeightInvalid(role)),
+            ),
+        }
+        cx.notify();
+    }
+
+    fn save(&mut self) {
+        // Without a store the startup notice already says that settings are not saved.
+        let Some(store) = &self.store else { return };
+        match store.save(&self.config) {
+            Ok(()) => self.set_notice(NoticeSource::Save, None),
+            Err(err) => self.set_notice(NoticeSource::Save, Some(Notice::Save(err.to_string()))),
+        }
+    }
+
+    fn toggle_entries(&mut self, cx: &mut Context<Self>) {
+        match self.giveaway.state() {
+            GiveawayState::Open => self.giveaway.close(),
+            GiveawayState::Closed => {
+                if self.commit_rule(self.config.mode, cx) {
+                    self.giveaway.open();
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn draw(&mut self, cx: &mut Context<Self>) {
+        let weights = self.config.weights;
+        let pool: Vec<String> = self
+            .giveaway
+            .entrants()
+            .filter(|e| e.effective(&weights).1 > 0)
+            .map(|e| e.display_name.clone())
+            .collect();
+        match self.giveaway.draw(&weights, &mut rand::rng()) {
+            DrawOutcome::Winner(winner) => {
+                let reel = stage::reveal_reel(&pool, &winner.display_name, &mut rand::rng());
+                self.stage = Stage::Revealing {
+                    reel,
+                    frame: 0,
+                    winner,
+                };
+                self.start_ticker(cx);
+            }
+            // The draw buttons are disabled with the reason shown whenever nobody can win.
+            DrawOutcome::EmptyPool | DrawOutcome::NoDrawable => {}
+        }
+        cx.notify();
+    }
+
+    fn start_ticker(&mut self, cx: &mut Context<Self>) {
+        self.ticker = Some(
+            cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                loop {
+                    cx.background_executor().timer(TICK).await;
+                    let running = this.update(cx, |view, cx| view.tick(cx)).unwrap_or(false);
+                    if !running {
+                        break;
+                    }
+                }
+            }),
+        );
+    }
+
+    /// Advances the reveal or the stopwatch; returns whether the ticker is still needed.
+    fn tick(&mut self, cx: &mut Context<Self>) -> bool {
+        let now = Instant::now();
+        match &mut self.stage {
+            Stage::List => false,
+            Stage::Revealing {
+                reel,
+                frame,
+                winner,
+            } => {
+                *frame += 1;
+                if *frame >= reel.len() {
+                    self.stage = Stage::Winner {
+                        watch: WinnerWatch::new(winner.clone(), now),
+                        shown_second: 0,
+                    };
+                }
+                cx.notify();
+                true
+            }
+            Stage::Winner {
+                watch,
+                shown_second,
+            } => {
+                let second = watch.elapsed(now).as_secs();
+                if second != *shown_second {
+                    *shown_second = second;
+                    cx.notify();
+                }
+                watch.state() == WaitState::Waiting
+            }
+        }
+    }
+
+    fn finish_winner(&mut self, cx: &mut Context<Self>) {
+        self.stage = Stage::List;
+        self.ticker = None;
+        cx.notify();
+    }
+
+    fn clear_list(&mut self, cx: &mut Context<Self>) {
+        self.giveaway.reset();
+        self.finish_winner(cx);
+    }
+
+    fn set_language(&mut self, language: Language, window: &mut Window, cx: &mut Context<Self>) {
+        i18n::apply(language);
+        self.config.language = Some(language);
+        self.save();
+        self.channel_input.update(cx, |input, cx| {
+            input.set_placeholder(t!("step.connect.placeholder"), window, cx)
+        });
+        self.keyword_input.update(cx, |input, cx| {
+            input.set_placeholder(t!("step.keyword.placeholder"), window, cx)
+        });
+        cx.notify();
+    }
+
+    fn toggle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let next = match self.theme() {
+            ThemeChoice::Dark => ThemeChoice::Light,
+            ThemeChoice::Light => ThemeChoice::Dark,
+        };
+        self.config.theme = Some(next);
+        self.save();
+        self.apply_theme(window, cx);
+    }
+
+    fn apply_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let theme = self.theme();
+        self.palette = Palette::for_theme(theme);
+        Palette::apply(theme, window, cx);
+        cx.notify();
+    }
+}
+
+fn is_dark(appearance: WindowAppearance) -> bool {
+    matches!(
+        appearance,
+        WindowAppearance::Dark | WindowAppearance::VibrantDark
+    )
+}
+
+impl Render for AppView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = self.palette;
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .bg(p.bg)
+            .text_color(p.text)
+            .child(self.render_header(window, cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.render_steps(cx))
+                    .child(self.render_stage(cx)),
+            )
+    }
+}

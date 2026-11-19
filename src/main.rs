@@ -52,7 +52,7 @@ fn main() {
             }),
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
-                size(px(820.), px(640.)),
+                size(px(1180.), px(760.)),
                 cx,
             ))),
             ..Default::default()

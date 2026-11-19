@@ -6080,6 +6080,7 @@ dependencies = [
  "rand 0.10.4",
  "rust-i18n",
  "serde",
+ "serde_json",
  "sys-locale",
  "tempfile",
  "thiserror 2.0.21",
