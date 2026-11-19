@@ -284,7 +284,9 @@ impl AppView {
                 .when(active, |b| b.primary())
                 .when(!active, |b| b.outline())
                 .label(t!("step.connect.connect").into_owned())
-                .on_click(cx.listener(move |this, _, _, cx| this.connect(platform, cx)))
+                .on_click(
+                    cx.listener(move |this, _, window, cx| this.connect(platform, window, cx)),
+                )
         };
         let prefix = if multi {
             palette::platform_logo(platform, 14.).into_any_element()

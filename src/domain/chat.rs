@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::badges::BadgeUrl;
-use super::platform::{KickChannel, Platform, UserKey};
+use super::platform::{KickChannel, Platform, UserKey, strip_scheme};
 use super::role::{Role, kick_roles, roles_from_badges, youtube_roles};
 
 /// A chat badge as Twitch sends it in the `badges` tag, e.g. `subscriber/3012`.
@@ -238,7 +238,8 @@ impl Keyword {
     }
 }
 
-/// Twitch channel login: lowercase `[a-z0-9_]{1,25}`.
+/// Twitch channel login: lowercase `[a-z0-9_]{1,25}`. Parsed from the name or a channel link
+/// (`twitch.tv/<login>`, also the popout chat `twitch.tv/popout/<login>/chat`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ChannelLogin(String);
@@ -250,7 +251,23 @@ pub struct InvalidChannel(pub String);
 
 impl ChannelLogin {
     pub fn parse(raw: &str) -> Result<Self, InvalidChannel> {
-        let login = raw.trim().to_ascii_lowercase();
+        let text = raw.trim().to_ascii_lowercase();
+        let rest = strip_scheme(&text);
+        let login = match rest
+            .strip_prefix("twitch.tv/")
+            .or_else(|| rest.strip_prefix("m.twitch.tv/"))
+        {
+            Some(path) => {
+                let mut segments = path.split(['/', '?', '#']);
+                match segments.next() {
+                    Some("popout") => segments.next(),
+                    first => first,
+                }
+                .unwrap_or_default()
+                .to_owned()
+            }
+            None => rest.to_owned(),
+        };
         let valid = (1..=25).contains(&login.len())
             && login
                 .bytes()
@@ -298,6 +315,20 @@ impl From<ChannelLogin> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn twitch_links_give_the_channel_login() {
+        for link in [
+            "https://www.twitch.tv/XQC",
+            "twitch.tv/xqc?sr=a",
+            "m.twitch.tv/xqc/",
+            "https://www.twitch.tv/popout/xqc/chat?popout=",
+        ] {
+            assert_eq!(ChannelLogin::parse(link).unwrap().as_str(), "xqc", "{link}");
+        }
+        assert!(ChannelLogin::parse("https://www.twitch.tv/").is_err());
+        assert!(ChannelLogin::parse("https://kick.com/xqc").is_err());
+    }
 
     #[test]
     fn profiles_link_to_each_platform() {

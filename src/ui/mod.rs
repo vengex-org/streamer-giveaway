@@ -237,19 +237,19 @@ impl AppView {
                 };
                 this.set_language(*choice, window, cx);
             }),
-            cx.subscribe_in(&channel_input, window, |this, _, event, _, cx| {
+            cx.subscribe_in(&channel_input, window, |this, _, event, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.connect(Platform::Twitch, cx);
+                    this.connect(Platform::Twitch, window, cx);
                 }
             }),
-            cx.subscribe_in(&kick_input, window, |this, _, event, _, cx| {
+            cx.subscribe_in(&kick_input, window, |this, _, event, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.connect(Platform::Kick, cx);
+                    this.connect(Platform::Kick, window, cx);
                 }
             }),
-            cx.subscribe_in(&youtube_input, window, |this, _, event, _, cx| {
+            cx.subscribe_in(&youtube_input, window, |this, _, event, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.connect(Platform::YouTube, cx);
+                    this.connect(Platform::YouTube, window, cx);
                 }
             }),
             cx.subscribe_in(&search_input, window, |this, _, event, _, cx| {
@@ -470,8 +470,48 @@ impl AppView {
         }
     }
 
+    /// One platform mode shows one chat field. A link to another platform entered there moves to
+    /// that platform's field and chooses it; the field it was entered in gets its saved name back.
+    /// Returns the platform to connect.
+    fn follow_link(
+        &mut self,
+        field: Platform,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Platform {
+        if self.config.chat_mode != ChatMode::Single {
+            return field;
+        }
+        let text = self.input(field).read(cx).value().to_string();
+        let Some(linked) = Platform::of_link(&text).filter(|&linked| linked != field) else {
+            return field;
+        };
+        let saved = self.saved_chat_name(field);
+        self.input(field)
+            .update(cx, |input, cx| input.set_value(saved, window, cx));
+        self.input(linked)
+            .update(cx, |input, cx| input.set_value(text, window, cx));
+        self.choose_chats(ChatMode::Single, linked, cx);
+        linked
+    }
+
+    /// The channel or stream last connected on `platform`, as its field shows it.
+    fn saved_chat_name(&self, platform: Platform) -> String {
+        match platform {
+            Platform::Twitch => self.config.channel.as_ref().map(|c| c.as_str().to_owned()),
+            Platform::Kick => self
+                .config
+                .kick_channel
+                .as_ref()
+                .map(|c| c.as_str().to_owned()),
+            Platform::YouTube => self.config.youtube_source.as_ref().map(ToString::to_string),
+        }
+        .unwrap_or_default()
+    }
+
     /// Reads the platform's input and joins that chat; a typo shows a notice instead.
-    fn connect(&mut self, platform: Platform, cx: &mut Context<Self>) {
+    fn connect(&mut self, field: Platform, window: &mut Window, cx: &mut Context<Self>) {
+        let platform = self.follow_link(field, window, cx);
         let raw = self.input(platform).read(cx).value().to_string();
         let target = match platform {
             Platform::Twitch => ChannelLogin::parse(&raw)

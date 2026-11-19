@@ -80,10 +80,10 @@ cs = "Připoj se k chatu"
 es = "Conéctate a tu chat"
 
 [step.connect.hint]
-sk = "Napíš názov svojho Twitch kanála, teda časť adresy za twitch.tv/."
-en = "Type your Twitch channel name, the part of your link after twitch.tv/."
-cs = "Napiš název svého Twitch kanálu, tedy část adresy za twitch.tv/."
-es = "Escribe el nombre de tu canal de Twitch, lo que va después de twitch.tv/ en tu enlace."
+sk = "Napíš názov Twitch kanála alebo vlož odkaz na stream. Odkaz na Kick alebo YouTube prepne platformu."
+en = "Type your Twitch channel name or paste your stream link. A Kick or YouTube link switches the platform."
+cs = "Napiš název Twitch kanálu nebo vlož odkaz na stream. Odkaz na Kick nebo YouTube přepne platformu."
+es = "Escribe el nombre de tu canal de Twitch o pega el enlace de tu directo. Un enlace de Kick o YouTube cambia la plataforma."
 
 [step.connect.placeholder]
 sk = "názov kanála"

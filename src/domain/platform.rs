@@ -30,6 +30,24 @@ impl Platform {
     pub fn parse(raw: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|p| p.as_str() == raw)
     }
+
+    /// The platform a link points to (`twitch.tv/…`, `kick.com/…`, `youtube.com/…`,
+    /// `youtu.be/…`); `None` for anything else, such as a bare channel name.
+    pub fn of_link(raw: &str) -> Option<Self> {
+        let text = raw.trim().to_ascii_lowercase();
+        let rest = strip_scheme(&text);
+        let hosts: [(&str, Self); 6] = [
+            ("twitch.tv/", Self::Twitch),
+            ("m.twitch.tv/", Self::Twitch),
+            ("kick.com/", Self::Kick),
+            ("youtube.com/", Self::YouTube),
+            ("m.youtube.com/", Self::YouTube),
+            ("youtu.be/", Self::YouTube),
+        ];
+        hosts
+            .into_iter()
+            .find_map(|(host, platform)| rest.starts_with(host).then_some(platform))
+    }
 }
 
 impl fmt::Display for Platform {
@@ -208,7 +226,7 @@ impl From<YouTubeSource> for String {
     }
 }
 
-fn strip_scheme(text: &str) -> &str {
+pub(super) fn strip_scheme(text: &str) -> &str {
     let text = text
         .strip_prefix("https://")
         .or_else(|| text.strip_prefix("http://"))
@@ -223,6 +241,26 @@ fn first_segment(path: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn links_name_their_platform() {
+        for (link, platform) in [
+            ("https://www.twitch.tv/xqc", Some(Platform::Twitch)),
+            ("twitch.tv/popout/xqc/chat", Some(Platform::Twitch)),
+            ("https://kick.com/xqc", Some(Platform::Kick)),
+            (
+                "https://www.youtube.com/watch?v=abcdefghijk",
+                Some(Platform::YouTube),
+            ),
+            ("HTTPS://YOUTU.BE/abcdefghijk", Some(Platform::YouTube)),
+            ("m.youtube.com/@handle", Some(Platform::YouTube)),
+            ("xqc", None),
+            ("@handle", None),
+            ("https://example.com/twitch.tv/xqc", None),
+        ] {
+            assert_eq!(Platform::of_link(link), platform, "{link}");
+        }
+    }
 
     #[test]
     fn names_round_trip() {
