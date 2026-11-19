@@ -1,9 +1,13 @@
-//! Measures a live channel's chat: messages per second (mean and peak) and unique chatters.
+//! Measures a live chat: messages per second (mean and peak) and unique chatters.
+//! The channel is a Twitch login, `kick:<name>` or `youtube:<link or @handle>`.
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use streamer_giveaway::chat::{ChatBridge, ChatCommand, ChatEvent, connection_problem_layer};
+use streamer_giveaway::chat::{
+    ChatBridge, ChatCommand, ChatEvent, ChatTarget, ConnectionStatus, connection_problem_layer,
+};
 use streamer_giveaway::domain::chat::ChannelLogin;
+use streamer_giveaway::domain::platform::{KickChannel, YouTubeSource};
 
 fn main() {
     let channel = std::env::args().nth(1).unwrap();
@@ -15,7 +19,7 @@ fn main() {
     let bridge = ChatBridge::spawn(problems).unwrap();
     bridge
         .commands
-        .send_blocking(ChatCommand::Join(ChannelLogin::parse(&channel).unwrap()))
+        .send_blocking(ChatCommand::Join(target(&channel)))
         .unwrap();
     let mut start = None;
     let mut per_sec: HashMap<u64, u32> = HashMap::new();
@@ -26,6 +30,12 @@ fn main() {
         let Ok(event) = bridge.events.recv_blocking() else {
             break;
         };
+        if let ChatEvent::Status(_, status) = &event {
+            eprintln!("{status:?}");
+            if matches!(status, ConnectionStatus::Failed { .. }) {
+                return;
+            }
+        }
         if let ChatEvent::Message(m) = event {
             let s = *start.get_or_insert_with(Instant::now);
             let t = s.elapsed().as_secs();
@@ -33,7 +43,7 @@ fn main() {
                 break;
             }
             *per_sec.entry(t).or_default() += 1;
-            users.insert(m.user_id);
+            users.insert(m.user().clone());
             total += 1;
         }
     }
@@ -43,4 +53,14 @@ fn main() {
         total as f64 / secs as f64,
         users.len()
     );
+}
+
+fn target(raw: &str) -> ChatTarget {
+    if let Some(name) = raw.strip_prefix("kick:") {
+        ChatTarget::Kick(KickChannel::parse(name).unwrap())
+    } else if let Some(source) = raw.strip_prefix("youtube:") {
+        ChatTarget::YouTube(YouTubeSource::parse(source).unwrap())
+    } else {
+        ChatTarget::Twitch(ChannelLogin::parse(raw).unwrap())
+    }
 }

@@ -1,4 +1,4 @@
-//! Simulated Twitch chat for trying the app, recording screenshots and testing big giveaways
+//! Simulated Twitch, Kick and YouTube chat for trying the app, recording screenshots and testing big giveaways
 //! without a live stream. Start the app with `--demo`, or `--demo-viewers=8000` (see [`Crowd`])
 //! for a giveaway announced to a large audience.
 
@@ -10,7 +10,10 @@ use rand::seq::IndexedRandom;
 use rand::{RngExt, SeedableRng};
 
 use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
-use crate::domain::chat::{Badge, ChatMessage};
+use std::collections::HashSet;
+
+use crate::domain::chat::{Badge, ChatMessage, KickBadge, YouTubeBadge};
+use crate::domain::platform::Platform;
 
 pub const DEMO_CHANNEL: &str = "pixelpaladin";
 pub const DEMO_KEYWORD: &str = "GIVEME";
@@ -28,6 +31,10 @@ const IDLE_MESSAGE_EVERY: Duration = Duration::from_millis(400);
 const WINNER_REPLY_AFTER: Duration = Duration::from_secs(6);
 /// The broadcaster's user id; their own "GIVEME" shows that the app never lets them enter.
 const BROADCASTER_ID: &str = "0";
+/// Of every 20 chatters, this many are on Kick and this many on YouTube; the rest on Twitch. A
+/// made-up split for the demo, roughly a multistream that started on Twitch.
+const KICK_PER_20: usize = 3;
+const YOUTUBE_PER_20: usize = 3;
 
 const FIRST: [&str; 16] = [
     "Pixel", "Turbo", "Sneaky", "Cozy", "Mega", "Lucky", "Shadow", "Frosty", "Salty", "Hyper",
@@ -68,12 +75,23 @@ const WINNER_REPLIES: [&str; 2] = [
     "thank you so much, how do I claim it?",
 ];
 
-/// One simulated chatter. Badges stay the same for all their messages.
+/// One simulated chatter. Platform and badges stay the same for all their messages; badges are
+/// written the Twitch way and translated for the other platforms.
 #[derive(Debug, Clone)]
 struct Chatter {
+    platform: Platform,
     user_id: String,
     name: String,
     badges: Vec<Badge>,
+}
+
+/// Spreads chatters over the platforms by their number, so the random draws stay as before.
+fn platform_of(index: usize) -> Platform {
+    match index % 20 {
+        n if n < KICK_PER_20 => Platform::Kick,
+        n if n < KICK_PER_20 + YOUTUBE_PER_20 => Platform::YouTube,
+        _ => Platform::Twitch,
+    }
 }
 
 fn chatters(rng: &mut StdRng, count: usize) -> Vec<Chatter> {
@@ -86,7 +104,13 @@ fn chatters(rng: &mut StdRng, count: usize) -> Vec<Chatter> {
                 1 => format!("{first}_{second}{i}"),
                 _ => format!("{}{}{}", first.to_lowercase(), second, i),
             };
+            let platform = platform_of(i);
+            let name = match platform {
+                Platform::YouTube => format!("@{name}"),
+                Platform::Twitch | Platform::Kick => name,
+            };
             Chatter {
+                platform,
                 user_id: i.to_string(),
                 name,
                 badges: badges(rng),
@@ -116,6 +140,21 @@ fn badges(rng: &mut StdRng) -> Vec<Badge> {
 
 /// The scripted feed: [`TOTAL_MESSAGES`] messages with their time offset from the start, in
 /// order. The same seed gives the same feed.
+/// A chatter from a joined chat to say something while the feed is idle; `None` when no chat is
+/// joined.
+fn idle_author<'a>(
+    script: &'a [(Duration, ChatMessage)],
+    joined: &HashSet<Platform>,
+    rng: &mut StdRng,
+) -> Option<&'a ChatMessage> {
+    let authors: Vec<&ChatMessage> = script
+        .iter()
+        .map(|(_, m)| m)
+        .filter(|m| joined.contains(&m.platform()))
+        .collect();
+    authors.choose(rng).copied()
+}
+
 pub fn feed(seed: u64) -> Vec<(Duration, ChatMessage)> {
     let mut rng = StdRng::seed_from_u64(seed);
     let people = chatters(&mut rng, CHATTERS);
@@ -129,12 +168,12 @@ pub fn feed(seed: u64) -> Vec<(Duration, ChatMessage)> {
         .enumerate()
         .map(|(n, offset)| {
             let msg = if n % 997 == 500 {
-                ChatMessage {
-                    user_id: BROADCASTER_ID.into(),
-                    display_name: DEMO_CHANNEL.into(),
-                    badges: vec![Badge::new("broadcaster", "1")],
-                    text: format!("type {DEMO_KEYWORD} to enter!"),
-                }
+                ChatMessage::twitch(
+                    BROADCASTER_ID,
+                    DEMO_CHANNEL,
+                    format!("type {DEMO_KEYWORD} to enter!"),
+                    &[Badge::new("broadcaster", "1")],
+                )
             } else {
                 let who = people.choose(&mut rng).expect("chatters exist");
                 let pool: &[&str] = if rng.random_bool(ENTRY_SHARE) {
@@ -254,7 +293,7 @@ pub fn raffle_times(feed: &[(Duration, ChatMessage)]) -> RaffleTimes {
     let mut seen = std::collections::HashSet::new();
     let firsts: Vec<Duration> = feed
         .iter()
-        .filter(|(_, m)| m.text == DEMO_KEYWORD && seen.insert(m.user_id.as_str()))
+        .filter(|(_, m)| m.text() == DEMO_KEYWORD && seen.insert(m.user()))
         .map(|(at, _)| *at)
         .collect();
     let at_share = |share: f64| {
@@ -271,11 +310,33 @@ pub fn raffle_times(feed: &[(Duration, ChatMessage)]) -> RaffleTimes {
 }
 
 fn message(who: &Chatter, text: &str) -> ChatMessage {
-    ChatMessage {
-        user_id: who.user_id.clone(),
-        display_name: who.name.clone(),
-        badges: who.badges.clone(),
-        text: text.to_owned(),
+    let (id, name) = (who.user_id.clone(), who.name.clone());
+    match who.platform {
+        Platform::Twitch => ChatMessage::twitch(id, name, text, &who.badges),
+        Platform::Kick => {
+            let badges: Vec<KickBadge> = who
+                .badges
+                .iter()
+                .map(|badge| KickBadge {
+                    kind: badge.name.clone(),
+                    // Twitch writes the tier in the thousands and the months below them.
+                    months: badge.version.parse::<u32>().ok().map(|v| (v % 1000).max(1)),
+                })
+                .collect();
+            ChatMessage::kick(id, name, text, &badges)
+        }
+        Platform::YouTube => {
+            let badges: Vec<YouTubeBadge> = who
+                .badges
+                .iter()
+                .filter_map(|badge| match badge.name.as_str() {
+                    "subscriber" => Some(YouTubeBadge::Member(None)),
+                    "moderator" => Some(YouTubeBadge::Moderator),
+                    _ => None,
+                })
+                .collect();
+            ChatMessage::youtube(format!("UC{id}"), name, text, &badges)
+        }
     }
 }
 
@@ -304,6 +365,8 @@ fn run(
 ) {
     let mut rng = StdRng::seed_from_u64(7);
     let mut started: Option<Instant> = None;
+    // Only chats the UI joined deliver their part of the feed.
+    let mut joined: HashSet<Platform> = HashSet::new();
     let mut next = 0;
     let mut idle_at = Instant::now();
     let mut replies: Vec<(Instant, ChatMessage)> = Vec::new();
@@ -312,38 +375,41 @@ fn run(
     loop {
         while let Ok(command) = commands.try_recv() {
             match command {
-                ChatCommand::Join(channel) => {
-                    let connected = send(ChatEvent::Status(ConnectionStatus::Connecting {
-                        channel: channel.clone(),
+                ChatCommand::Join(target) => {
+                    let platform = target.platform();
+                    let connecting = ConnectionStatus::Connecting {
+                        target: target.clone(),
                         cause: None,
-                    }));
+                    };
+                    let connected = send(ChatEvent::Status(platform, connecting));
                     thread::sleep(Duration::from_millis(600));
-                    if !connected || !send(ChatEvent::Status(ConnectionStatus::Connected(channel)))
-                    {
+                    let joined_event =
+                        ChatEvent::Status(platform, ConnectionStatus::Connected(target));
+                    if !connected || !send(joined_event) {
                         return;
                     }
-                    started = Some(Instant::now());
-                    next = 0;
+                    if joined.is_empty() {
+                        started = Some(Instant::now());
+                        next = 0;
+                    }
+                    joined.insert(platform);
                 }
-                ChatCommand::Leave => {
-                    started = None;
-                    if !send(ChatEvent::Status(ConnectionStatus::Idle)) {
+                ChatCommand::Leave(platform) => {
+                    joined.remove(&platform);
+                    if joined.is_empty() {
+                        started = None;
+                    }
+                    if !send(ChatEvent::Status(platform, ConnectionStatus::Idle)) {
                         return;
                     }
                 }
-                ChatCommand::WinnerDrawn(user_id) => {
-                    let winner = script.iter().map(|(_, m)| m).find(|m| m.user_id == user_id);
+                ChatCommand::WinnerDrawn(user) => {
+                    let winner = script.iter().map(|(_, m)| m).find(|m| *m.user() == user);
                     if let Some(winner) = winner {
                         let now = Instant::now();
                         for (i, text) in WINNER_REPLIES.iter().enumerate() {
                             let at = now + WINNER_REPLY_AFTER + Duration::from_secs(4 * i as u64);
-                            replies.push((
-                                at,
-                                ChatMessage {
-                                    text: (*text).to_owned(),
-                                    ..winner.clone()
-                                },
-                            ));
+                            replies.push((at, winner.with_text(*text)));
                         }
                     }
                 }
@@ -356,20 +422,21 @@ fn run(
         let now = Instant::now();
         if let Some(start) = started {
             while next < script.len() && start + script[next].0 <= now {
-                if !send(ChatEvent::Message(script[next].1.clone())) {
+                let message = &script[next].1;
+                if joined.contains(&message.platform())
+                    && !send(ChatEvent::Message(message.clone()))
+                {
                     return;
                 }
                 next += 1;
             }
             if next == script.len() && now >= idle_at {
-                let (_, author) = script.choose(&mut rng).expect("the feed is not empty");
-                let line = CHATTER.choose(&mut rng).expect("lines exist");
-                let chatter = ChatMessage {
-                    text: (*line).to_owned(),
-                    ..author.clone()
-                };
-                if !send(ChatEvent::Message(chatter)) {
-                    return;
+                // A small crowd can leave a joined chat without chatters; it then stays quiet.
+                if let Some(author) = idle_author(&script, &joined, &mut rng) {
+                    let line = CHATTER.choose(&mut rng).expect("lines exist");
+                    if !send(ChatEvent::Message(author.with_text(*line))) {
+                        return;
+                    }
                 }
                 idle_at = now + IDLE_MESSAGE_EVERY;
             }
@@ -389,6 +456,8 @@ fn run(
 mod tests {
     use std::collections::HashSet;
 
+    use crate::domain::role::Role;
+
     use super::*;
     use crate::domain::chat::Keyword;
     use crate::domain::matcher::{MatchMode, matches};
@@ -407,10 +476,10 @@ mod tests {
         let keyword = Keyword::parse(DEMO_KEYWORD).unwrap();
         let entries = feed
             .iter()
-            .filter(|(_, m)| matches(MatchMode::Word, &keyword, &m.text))
+            .filter(|(_, m)| matches(MatchMode::Word, &keyword, m.text()))
             .count();
         assert!((3000..4500).contains(&entries), "{entries} entries");
-        let people: HashSet<_> = feed.iter().map(|(_, m)| &m.user_id).collect();
+        let people: HashSet<_> = feed.iter().map(|(_, m)| m.user()).collect();
         assert!(people.len() > 1500, "{} people", people.len());
     }
 
@@ -418,24 +487,24 @@ mod tests {
     fn same_seed_gives_the_same_feed() {
         let a: Vec<_> = feed(1)
             .into_iter()
-            .map(|(t, m)| (t, m.text, m.user_id))
+            .map(|(t, m)| (t, m.text().to_owned(), m.user().clone()))
             .collect();
         let b: Vec<_> = feed(1)
             .into_iter()
-            .map(|(t, m)| (t, m.text, m.user_id))
+            .map(|(t, m)| (t, m.text().to_owned(), m.user().clone()))
             .collect();
         assert_eq!(a, b);
     }
 
     #[test]
-    fn a_chatter_keeps_the_same_badges() {
+    fn a_chatter_keeps_the_same_roles() {
         let feed = feed(42);
         let mut seen = std::collections::HashMap::new();
         for (_, m) in &feed {
             let first = seen
-                .entry(m.user_id.clone())
-                .or_insert_with(|| m.badges.clone());
-            assert_eq!(first, &m.badges, "user {}", m.user_id);
+                .entry(m.user().clone())
+                .or_insert_with(|| m.roles().to_vec());
+            assert_eq!(first, m.roles(), "user {:?}", m.user());
         }
     }
 
@@ -465,17 +534,63 @@ mod tests {
 
     #[test]
     fn throttle_spaces_messages_evenly_above_the_cap() {
-        let msg = |n: u32| ChatMessage {
-            user_id: n.to_string(),
-            display_name: "x".into(),
-            badges: vec![],
-            text: "x".into(),
-        };
+        let msg = |n: u32| ChatMessage::twitch(n.to_string(), "x", "x", &[]);
         let burst: Vec<_> = (0..4).map(|n| (Duration::ZERO, msg(n))).collect();
         let times: Vec<_> = throttle(burst, 2).into_iter().map(|(t, _)| t).collect();
         assert_eq!(
             times,
             [0, 500, 1000, 1500].map(Duration::from_millis).to_vec()
         );
+    }
+
+    #[test]
+    fn the_feed_has_chatters_on_every_platform() {
+        let feed = feed(42);
+        let count = |platform| {
+            feed.iter()
+                .filter(|(_, m)| m.platform() == platform)
+                .count()
+        };
+        let (twitch, kick, youtube) = (
+            count(Platform::Twitch),
+            count(Platform::Kick),
+            count(Platform::YouTube),
+        );
+        assert!(twitch > kick + youtube, "{twitch} {kick} {youtube}");
+        assert!(kick > 500 && youtube > 500, "{kick} {youtube}");
+    }
+
+    #[test]
+    fn kick_and_youtube_demo_subs_get_their_platform_roles() {
+        let feed = feed(42);
+        let has = |platform, role| {
+            feed.iter()
+                .any(|(_, m)| m.platform() == platform && m.roles().contains(&role))
+        };
+        assert!(has(Platform::Kick, Role::SubT1));
+        assert!(has(Platform::YouTube, Role::SubT1));
+        assert!(has(Platform::YouTube, Role::Mod));
+        assert!(!has(Platform::Kick, Role::SubT3));
+    }
+
+    #[test]
+    fn idle_chatters_come_only_from_joined_chats() {
+        let feed = feed(42);
+        let mut rng = StdRng::seed_from_u64(1);
+        let joined = HashSet::from([Platform::Kick]);
+        for _ in 0..200 {
+            let author = idle_author(&feed, &joined, &mut rng).unwrap();
+            assert_eq!(author.platform(), Platform::Kick);
+        }
+        assert!(idle_author(&feed, &HashSet::new(), &mut rng).is_none());
+    }
+
+    #[test]
+    fn a_small_crowd_leaves_twitch_without_idle_chatters() {
+        // Five viewers all land on Kick or YouTube, so a joined Twitch chat has nobody to talk.
+        let feed = crowd_feed(Crowd::with_viewers(5), 3);
+        let mut rng = StdRng::seed_from_u64(1);
+        let joined = HashSet::from([Platform::Twitch]);
+        assert!(idle_author(&feed, &joined, &mut rng).is_none());
     }
 }

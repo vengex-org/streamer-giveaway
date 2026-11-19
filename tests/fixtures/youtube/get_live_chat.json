@@ -1,0 +1,217 @@
+{
+ "continuationContents": {
+  "liveChatContinuation": {
+   "continuations": [
+    {
+     "timedContinuationData": {
+      "timeoutMs": 4778,
+      "continuation": "NEXT_CONTINUATION"
+     }
+    }
+   ],
+   "actions": [
+    {
+     "addChatItemAction": {
+      "item": {
+       "liveChatTextMessageRenderer": {
+        "message": {
+         "runs": [
+          {
+           "text": "GIVEME"
+          }
+         ]
+        },
+        "authorName": {
+         "simpleText": "@member_viewer"
+        },
+        "id": "msg-member",
+        "timestampUsec": "1795092584888262",
+        "authorBadges": [
+         {
+          "liveChatAuthorBadgeRenderer": {
+           "customThumbnail": {
+            "thumbnails": [
+             {
+              "url": "https://yt3.ggpht.com/member-badge=s16-c-k",
+              "width": 16,
+              "height": 16
+             },
+             {
+              "url": "https://yt3.ggpht.com/member-badge=s32-c-k",
+              "width": 32,
+              "height": 32
+             }
+            ]
+           },
+           "tooltip": "Member (6 months)",
+           "accessibility": {
+            "accessibilityData": {
+             "label": "Member (6 months)"
+            }
+           }
+          }
+         }
+        ],
+        "authorExternalChannelId": "UCmember0000000000000001"
+       }
+      },
+      "clientId": "CNvA8f6IlJgDFeXBlAkdPyAwVg"
+     }
+    },
+    {
+     "addChatItemAction": {
+      "item": {
+       "liveChatTextMessageRenderer": {
+        "message": {
+         "runs": [
+          {
+           "text": "GIVEME please"
+          }
+         ]
+        },
+        "authorName": {
+         "simpleText": "@plain_viewer"
+        },
+        "id": "msg-plain",
+        "timestampUsec": "1795092556735376",
+        "authorExternalChannelId": "UCplain00000000000000002",
+        "trackingParams": "CAEQl98BIhMI4NXA9YiUmAMViR8GAB0iITf8"
+       }
+      },
+      "clientId": "CPKwu_GIlJgDFfJeTAgds2cbAg"
+     }
+    },
+    {
+     "addChatItemAction": {
+      "item": {
+       "liveChatTextMessageRenderer": {
+        "message": {
+         "runs": [
+          {
+           "emoji": {
+            "emojiId": "\ud83d\udc4b",
+            "shortcuts": [
+             ":waving_hand:",
+             ":wave:"
+            ],
+            "searchTerms": [
+             "waving",
+             "hand",
+             "wave"
+            ],
+            "supportsSkinTone": true,
+            "image": {
+             "thumbnails": [
+              {
+               "url": "https://fonts.gstatic.com/s/e/notoemoji/15.1/1f44b/72.png"
+              }
+             ],
+             "accessibility": {
+              "accessibilityData": {
+               "label": "\ud83d\udc4b"
+              }
+             }
+            },
+            "variantIds": [
+             "\ud83d\udc4b",
+             "\ud83d\udc4b\ud83c\udffb",
+             "\ud83d\udc4b\ud83c\udffc",
+             "\ud83d\udc4b\ud83c\udffd",
+             "\ud83d\udc4b\ud83c\udffe",
+             "\ud83d\udc4b\ud83c\udfff"
+            ]
+           }
+          },
+          {
+           "text": " GIVEME"
+          }
+         ]
+        },
+        "authorName": {
+         "simpleText": "@emoji_viewer"
+        },
+        "id": "msg-emoji",
+        "timestampUsec": "1795092559077923",
+        "authorExternalChannelId": "UCemoji00000000000000003",
+        "trackingParams": "CAEQl98BIhMI4NXA9YiUmAMViR8GAB0iITf8"
+       }
+      },
+      "clientId": "CKuxyvKIlJgDFR2KLQkdusYjyg"
+     }
+    },
+    {
+     "addChatItemAction": {
+      "item": {
+       "liveChatTextMessageRenderer": {
+        "message": {
+         "runs": [
+          {
+           "text": "GIVEME please"
+          }
+         ]
+        },
+        "authorName": {
+         "simpleText": "@mod_viewer"
+        },
+        "id": "msg-mod",
+        "timestampUsec": "1795092556735376",
+        "authorExternalChannelId": "UCmod0000000000000000004",
+        "trackingParams": "CAEQl98BIhMI4NXA9YiUmAMViR8GAB0iITf8",
+        "authorBadges": [
+         {
+          "liveChatAuthorBadgeRenderer": {
+           "icon": {
+            "iconType": "MODERATOR"
+           },
+           "tooltip": "Moderator"
+          }
+         }
+        ]
+       }
+      },
+      "clientId": "CPKwu_GIlJgDFfJeTAgds2cbAg"
+     }
+    },
+    {
+     "addChatItemAction": {
+      "item": {
+       "liveChatTextMessageRenderer": {
+        "message": {
+         "runs": [
+          {
+           "text": "GIVEME please"
+          }
+         ]
+        },
+        "authorName": {
+         "simpleText": "@the_streamer"
+        },
+        "id": "msg-owner",
+        "timestampUsec": "1795092556735376",
+        "authorExternalChannelId": "UCowner00000000000000005",
+        "trackingParams": "CAEQl98BIhMI4NXA9YiUmAMViR8GAB0iITf8",
+        "authorBadges": [
+         {
+          "liveChatAuthorBadgeRenderer": {
+           "icon": {
+            "iconType": "OWNER"
+           },
+           "tooltip": "Owner"
+          }
+         }
+        ]
+       }
+      },
+      "clientId": "CPKwu_GIlJgDFfJeTAgds2cbAg"
+     }
+    },
+    {
+     "addLiveChatTickerItemAction": {
+      "item": {},
+      "durationSec": "10"
+     }
+    }
+   ]
+  }
+ }
+}

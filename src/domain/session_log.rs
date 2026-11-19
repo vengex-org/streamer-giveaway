@@ -2,6 +2,7 @@ use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
 use super::giveaway::MessageOutcome;
+use super::platform::{Platform, UserKey};
 
 /// What a chat message meant for the giveaway, as written to the CSV log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +44,7 @@ impl LogKind {
 struct Row {
     elapsed: Duration,
     kind: LogKind,
-    user_id: String,
+    user: UserKey,
     display_name: String,
 }
 
@@ -68,23 +69,23 @@ impl SessionLog {
         self.opened_at
     }
 
-    pub fn record(&mut self, now: Instant, kind: LogKind, user_id: &str, display_name: &str) {
+    pub fn record(&mut self, now: Instant, kind: LogKind, user: &UserKey, display_name: &str) {
         self.rows.push(Row {
             elapsed: now.saturating_duration_since(self.opened_at),
             kind,
-            user_id: user_id.to_owned(),
+            user: user.clone(),
             display_name: display_name.to_owned(),
         });
     }
 
-    /// `elapsed_ms,kind,user_id,display_name`, one row per message.
+    /// `elapsed_ms,kind,user_id,display_name,platform`, one row per message.
     pub fn to_csv(&self) -> String {
         let mut out = String::from(HEADER);
         for row in &self.rows {
             out.push_str(&csv_row(
                 row.elapsed,
                 row.kind,
-                &row.user_id,
+                &row.user,
                 &row.display_name,
             ));
         }
@@ -93,16 +94,17 @@ impl SessionLog {
 }
 
 /// One log line, newline included.
-pub fn csv_row(elapsed: Duration, kind: LogKind, user_id: &str, display_name: &str) -> String {
+pub fn csv_row(elapsed: Duration, kind: LogKind, user: &UserKey, display_name: &str) -> String {
     let mut line = String::new();
     // Writing to a String cannot fail.
     let _ = writeln!(
         line,
-        "{},{},{},{}",
+        "{},{},{},{},{}",
         elapsed.as_millis(),
         kind.as_str(),
-        csv_field(user_id),
-        csv_field(display_name)
+        csv_field(&user.id),
+        csv_field(display_name),
+        user.platform.as_str()
     );
     line
 }
@@ -132,9 +134,12 @@ pub enum SummaryError {
 /// Reads a log written by [`SessionLog::to_csv`] and [`csv_row`].
 pub fn summarize(csv: &str) -> Result<SessionSummary, SummaryError> {
     let mut lines = csv.lines();
-    if lines.next() != Some(HEADER.trim_end()) {
-        return Err(SummaryError::Header);
-    }
+    // Logs from before Kick and YouTube have no platform column; all their rows are Twitch.
+    let with_platform = match lines.next() {
+        Some(header) if header == HEADER.trim_end() => true,
+        Some(header) if header == HEADER_TWITCH_ONLY.trim_end() => false,
+        _ => return Err(SummaryError::Header),
+    };
     let mut messages = 0;
     let mut open_for = Duration::ZERO;
     let mut entry_times = Vec::new();
@@ -142,8 +147,13 @@ pub fn summarize(csv: &str) -> Result<SessionSummary, SummaryError> {
     for (index, line) in lines.enumerate().filter(|(_, line)| !line.is_empty()) {
         let line_number = index + 2;
         let fields = split_csv_line(line).ok_or(SummaryError::Row(line_number))?;
-        let [elapsed, kind, _user_id, name] = fields.as_slice() else {
-            return Err(SummaryError::Row(line_number));
+        let (elapsed, kind, name) = match (with_platform, fields.as_slice()) {
+            (true, [elapsed, kind, _user_id, name, platform]) => {
+                Platform::parse(platform).ok_or(SummaryError::Row(line_number))?;
+                (elapsed, kind, name)
+            }
+            (false, [elapsed, kind, _user_id, name]) => (elapsed, kind, name),
+            _ => return Err(SummaryError::Row(line_number)),
         };
         let elapsed = elapsed
             .parse::<u64>()
@@ -173,7 +183,9 @@ pub fn summarize(csv: &str) -> Result<SessionSummary, SummaryError> {
     })
 }
 
-const HEADER: &str = "elapsed_ms,kind,user_id,display_name\n";
+const HEADER: &str = "elapsed_ms,kind,user_id,display_name,platform\n";
+/// Header of logs written before Kick and YouTube (v0.3.6 and older).
+const HEADER_TWITCH_ONLY: &str = "elapsed_ms,kind,user_id,display_name\n";
 
 /// Splits one RFC 4180 line; `None` when a quoted field never closes.
 fn split_csv_line(line: &str) -> Option<Vec<String>> {
@@ -230,6 +242,10 @@ fn csv_field(value: &str) -> String {
 mod tests {
     use super::*;
 
+    fn twitch(id: &str) -> UserKey {
+        UserKey::new(Platform::Twitch, id)
+    }
+
     #[test]
     fn csv_has_a_header_and_one_row_per_message() {
         let start = Instant::now();
@@ -237,18 +253,19 @@ mod tests {
         log.record(
             start + Duration::from_millis(1500),
             LogKind::Entry,
-            "7",
+            &twitch("7"),
             "Lucky",
         );
         log.record(
             start + Duration::from_millis(2000),
             LogKind::Chat,
-            "8",
+            &UserKey::new(Platform::Kick, "8"),
             "Other",
         );
         assert_eq!(
             log.to_csv(),
-            "elapsed_ms,kind,user_id,display_name\n1500,entry,7,Lucky\n2000,chat,8,Other\n"
+            "elapsed_ms,kind,user_id,display_name,platform\n\
+             1500,entry,7,Lucky,twitch\n2000,chat,8,Other,kick\n"
         );
     }
 
@@ -256,9 +273,10 @@ mod tests {
     fn names_with_commas_or_quotes_are_quoted() {
         let start = Instant::now();
         let mut log = SessionLog::new(start);
-        log.record(start, LogKind::Repeat, "1", "a,\"b\"");
+        log.record(start, LogKind::Repeat, &twitch("1"), "a,\"b\"");
         assert!(
-            log.to_csv().ends_with("0,repeat,1,\"a,\"\"b\"\"\"\n"),
+            log.to_csv()
+                .ends_with("0,repeat,1,\"a,\"\"b\"\"\",twitch\n"),
             "{}",
             log.to_csv()
         );
@@ -268,11 +286,14 @@ mod tests {
     fn values_a_spreadsheet_would_run_as_formulas_are_neutralised() {
         let start = Instant::now();
         let mut log = SessionLog::new(start);
-        log.record(start, LogKind::Chat, "1", "=HYPERLINK(\"x\")");
-        log.record(start, LogKind::Chat, "2", "@cmd");
+        log.record(start, LogKind::Chat, &twitch("1"), "=HYPERLINK(\"x\")");
+        log.record(start, LogKind::Chat, &twitch("2"), "@cmd");
         let csv = log.to_csv();
-        assert!(csv.contains("0,chat,1,\"'=HYPERLINK(\"\"x\"\")\""), "{csv}");
-        assert!(csv.contains("0,chat,2,'@cmd"), "{csv}");
+        assert!(
+            csv.contains("0,chat,1,\"'=HYPERLINK(\"\"x\"\")\",twitch"),
+            "{csv}"
+        );
+        assert!(csv.contains("0,chat,2,'@cmd,twitch"), "{csv}");
     }
 
     #[test]
@@ -286,13 +307,13 @@ mod tests {
             (4_000, LogKind::Repeat, "1"),
             (9_000, LogKind::Entry, "4"),
         ] {
-            log.record(start + Duration::from_millis(ms), kind, id, id);
+            log.record(start + Duration::from_millis(ms), kind, &twitch(id), id);
         }
         let mut csv = log.to_csv();
         csv.push_str(&csv_row(
             Duration::from_secs(12),
             LogKind::Winner,
-            "3",
+            &twitch("3"),
             "=Lucky, \"the\" one",
         ));
 
@@ -316,7 +337,12 @@ mod tests {
         let mut log = SessionLog::new(start);
         for s in 1..=20 {
             let id = s.to_string();
-            log.record(start + Duration::from_secs(s), LogKind::Entry, &id, &id);
+            log.record(
+                start + Duration::from_secs(s),
+                LogKind::Entry,
+                &twitch(&id),
+                &id,
+            );
         }
         let summary = summarize(&log.to_csv()).unwrap();
         assert_eq!(summary.ninety_percent_in, Some(Duration::from_secs(18)));
@@ -327,6 +353,31 @@ mod tests {
         let summary = summarize("elapsed_ms,kind,user_id,display_name\n").unwrap();
         assert_eq!(summary.entrants, 0);
         assert_eq!(summary.ninety_percent_in, None);
+    }
+
+    #[test]
+    fn a_log_from_before_kick_and_youtube_still_summarises() {
+        let old = "elapsed_ms,kind,user_id,display_name\n1000,entry,7,Lucky\n2000,winner,7,Lucky\n";
+        let summary = summarize(old).unwrap();
+        assert_eq!(summary.entrants, 1);
+        assert_eq!(summary.winners, ["Lucky"]);
+    }
+
+    #[test]
+    fn an_unknown_platform_or_a_missing_column_is_an_error() {
+        let header = "elapsed_ms,kind,user_id,display_name,platform\n";
+        assert_eq!(
+            summarize(&format!("{header}10,entry,1,a,tiktok\n")),
+            Err(SummaryError::Row(2))
+        );
+        assert_eq!(
+            summarize(&format!("{header}10,entry,1,a\n")),
+            Err(SummaryError::Row(2))
+        );
+        assert_eq!(
+            summarize("elapsed_ms,kind,user_id,display_name\n10,entry,1,a,kick\n"),
+            Err(SummaryError::Row(2))
+        );
     }
 
     #[test]

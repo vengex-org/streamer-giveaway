@@ -7,11 +7,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use super::palette;
 use super::{AppView, Stage};
 use crate::chat::ConnectionStatus;
+use crate::domain::config::ChatMode;
 use crate::domain::eligibility::TimeUnit;
 use crate::domain::giveaway::GiveawayState;
 use crate::domain::matcher::MatchMode;
+use crate::domain::platform::Platform;
 use crate::domain::role::Role;
 use crate::i18n;
 
@@ -55,7 +58,7 @@ pub(super) fn next_step(inputs: StepInputs) -> Option<Step> {
 impl AppView {
     pub(super) fn render_steps(&self, can_win: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
-        let connected = matches!(self.status, ConnectionStatus::Connected(_));
+        let connected = self.any_connected();
         let keyword_text_valid = self.keyword_text_valid(cx);
         let open = self.giveaway.state() == GiveawayState::Open;
         let next = next_step(StepInputs {
@@ -94,7 +97,7 @@ impl AppView {
                 next == Some(Step::Connect),
                 connected,
                 t!("step.connect.title").into_owned(),
-                t!("step.connect.hint").into_owned(),
+                self.connect_hint(),
                 self.render_connect(next == Some(Step::Connect), cx),
             ))
             .child(self.step_section(
@@ -179,27 +182,136 @@ impl AppView {
             .child(body)
     }
 
+    fn connect_hint(&self) -> String {
+        match (self.config.chat_mode, self.config.platform) {
+            (ChatMode::Single, Platform::Twitch) => t!("step.connect.hint"),
+            (ChatMode::Single, Platform::Kick) => t!("step.connect.hint_kick"),
+            (ChatMode::Single, Platform::YouTube) => t!("step.connect.hint_youtube"),
+            (ChatMode::Multi, _) => t!("step.connect.hint_multi"),
+        }
+        .into_owned()
+    }
+
+    /// First the choice of one platform or multistream, then the chat inputs for it.
     fn render_connect(&self, active: bool, cx: &mut Context<Self>) -> impl IntoElement {
-        let has_channel = !matches!(self.status, ConnectionStatus::Idle);
-        h_flex()
-            .gap_2()
-            .child(
-                Input::new(&self.channel_input)
-                    .prefix(Icon::new(IconName::MessagesSquare).text_color(self.palette.muted))
-                    .flex_1(),
-            )
-            .child(if has_channel {
-                Button::new("disconnect")
-                    .outline()
-                    .label(t!("step.connect.disconnect").into_owned())
-                    .on_click(cx.listener(|this, _, _, cx| this.disconnect(cx)))
-            } else {
-                Button::new("connect")
-                    .when(active, |b| b.primary())
-                    .when(!active, |b| b.outline())
-                    .label(t!("step.connect.connect").into_owned())
-                    .on_click(cx.listener(|this, _, _, cx| this.connect(cx)))
+        let p = self.palette;
+        let mode = self.config.chat_mode;
+        let single_platform = (mode == ChatMode::Single).then_some(self.config.platform);
+        let modes = [
+            (ChatMode::Single, t!("step.connect.mode.single")),
+            (ChatMode::Multi, t!("step.connect.mode.multi")),
+        ]
+        .map(|(choice, label)| {
+            let selected = choice == mode;
+            Button::new(match choice {
+                ChatMode::Single => "chat-mode-single",
+                ChatMode::Multi => "chat-mode-multi",
             })
+            .small()
+            .flex_1()
+            .when(selected, |b| b.primary())
+            .when(!selected, |b| b.ghost())
+            .label(label.into_owned())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.choose_chats(choice, this.config.platform, cx)
+            }))
+        });
+        let mut body = v_flex().gap_2().child(
+            h_flex()
+                .p_0p5()
+                .gap_0p5()
+                .rounded_lg()
+                .bg(p.surface_alt)
+                .children(modes),
+        );
+        body = match single_platform {
+            Some(chosen) => {
+                let platforms = Platform::ALL.map(|platform| {
+                    let selected = platform == chosen;
+                    Button::new(SharedString::from(format!("platform-{platform}")))
+                        .small()
+                        .flex_1()
+                        .when(selected, |b| b.outline())
+                        .when(!selected, |b| b.ghost())
+                        .child(
+                            h_flex()
+                                .gap_1p5()
+                                .items_center()
+                                .child(palette::platform_logo(platform, 14.))
+                                .child(i18n::platform_name(platform)),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.choose_chats(ChatMode::Single, platform, cx)
+                        }))
+                });
+                body.child(h_flex().gap_1().children(platforms))
+                    .child(self.render_chat_row(chosen, active, false, cx))
+            }
+            None => {
+                let mut rows = Vec::new();
+                for platform in Platform::ALL {
+                    rows.push(self.render_chat_row(platform, active, true, cx));
+                }
+                body.children(rows)
+            }
+        };
+        body
+    }
+
+    /// One chat's input and connect button; in multistream with the logo and its own status.
+    fn render_chat_row(
+        &self,
+        platform: Platform,
+        active: bool,
+        multi: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = self.palette;
+        let status = self.status(platform);
+        // A failed chat offers Connect again; its status line still says why it stopped.
+        let running = !matches!(
+            status,
+            ConnectionStatus::Idle | ConnectionStatus::Failed { .. }
+        );
+        let started = !matches!(status, ConnectionStatus::Idle);
+        let button = if running {
+            Button::new(SharedString::from(format!("disconnect-{platform}")))
+                .outline()
+                .label(t!("step.connect.disconnect").into_owned())
+                .on_click(cx.listener(move |this, _, _, cx| this.disconnect(platform, cx)))
+        } else {
+            Button::new(SharedString::from(format!("connect-{platform}")))
+                .when(active, |b| b.primary())
+                .when(!active, |b| b.outline())
+                .label(t!("step.connect.connect").into_owned())
+                .on_click(cx.listener(move |this, _, _, cx| this.connect(platform, cx)))
+        };
+        let prefix = if multi {
+            palette::platform_logo(platform, 14.).into_any_element()
+        } else {
+            Icon::new(IconName::MessagesSquare)
+                .text_color(p.muted)
+                .into_any_element()
+        };
+        let row = h_flex()
+            .gap_2()
+            .child(Input::new(self.input(platform)).prefix(prefix).flex_1())
+            .child(button);
+        let (dot, text) = self.status_line(status);
+        v_flex()
+            .gap_1()
+            .child(row)
+            .when(multi && started, |column| {
+                column.child(
+                    h_flex()
+                        .gap_1p5()
+                        .items_center()
+                        .min_w_0()
+                        .child(div().size(px(6.)).flex_none().rounded_full().bg(dot))
+                        .child(div().text_xs().text_color(p.muted).truncate().child(text)),
+                )
+            })
+            .into_any_element()
     }
 
     fn render_keyword(&self, cx: &mut Context<Self>) -> impl IntoElement {

@@ -5,6 +5,7 @@ use gpui_kit::*;
 use streamer_giveaway::chat::{ChatBridge, connection_problem_layer};
 use streamer_giveaway::demo;
 use streamer_giveaway::domain::chat::{ChannelLogin, Keyword};
+use streamer_giveaway::domain::platform::{KickChannel, YouTubeSource};
 use streamer_giveaway::storage::{ConfigStore, Loaded};
 use streamer_giveaway::ui::{AppView, RunMode};
 use tracing_subscriber::prelude::*;
@@ -24,7 +25,7 @@ fn main() {
         )
         .init();
 
-    // `--demo` swaps Twitch for a simulated chat and keeps its own settings file;
+    // `--demo` swaps the real chats for a simulated one and keeps its own settings file;
     // `--demo-viewers=N` (with optional `--demo-share`, `--demo-half-life`, `--demo-chat`,
     // `--demo-cap`) plays a giveaway announced to N viewers instead.
     let args: Vec<String> = std::env::args().collect();
@@ -67,6 +68,13 @@ fn main() {
             config.channel = ChannelLogin::parse(demo::DEMO_CHANNEL).ok();
             config.keyword = Keyword::parse(demo::DEMO_KEYWORD).expect("demo keyword is not empty");
         }
+        // Multistream in the demo needs something in every chat input.
+        config.kick_channel = config
+            .kick_channel
+            .or_else(|| KickChannel::parse(demo::DEMO_CHANNEL).ok());
+        config.youtube_source = config
+            .youtube_source
+            .or_else(|| YouTubeSource::parse(demo::DEMO_CHANNEL).ok());
         demo::spawn(crowd)
     } else {
         ChatBridge::spawn(problems)

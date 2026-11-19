@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::chat::Badge;
+use super::chat::{Badge, YouTubeBadge};
 
 /// A chatter's standing in the channel; each role has its own weight. Order = rank.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -26,15 +26,38 @@ impl Role {
 
 /// Roles of a chatter from their badges, in `Role` order. A chatter with no other role is a Pleb.
 pub fn roles_from_badges(badges: &[Badge]) -> Vec<Role> {
-    let mut roles: Vec<Role> = badges
-        .iter()
-        .filter_map(|badge| match badge.name.as_str() {
-            "subscriber" | "founder" => Some(sub_tier(&badge.version)),
-            "vip" => Some(Role::Vip),
-            "moderator" | "lead_moderator" => Some(Role::Mod),
-            _ => None,
-        })
-        .collect();
+    ranked(badges.iter().filter_map(|badge| match badge.name.as_str() {
+        "subscriber" | "founder" => Some(sub_tier(&badge.version)),
+        "vip" => Some(Role::Vip),
+        "moderator" | "lead_moderator" => Some(Role::Mod),
+        _ => None,
+    }))
+}
+
+/// Roles of a Kick chatter from their badge types. Kick subs have no tiers, so subscriber,
+/// founder and OG all count as Sub tier 1.
+pub fn kick_roles<'a>(kinds: impl Iterator<Item = &'a str>) -> Vec<Role> {
+    ranked(kinds.filter_map(|kind| match kind {
+        "subscriber" | "founder" | "og" => Some(Role::SubT1),
+        "vip" => Some(Role::Vip),
+        "moderator" => Some(Role::Mod),
+        _ => None,
+    }))
+}
+
+/// Roles of a YouTube chatter. Membership levels are names each channel picks, with no order,
+/// so every member counts as Sub tier 1.
+pub fn youtube_roles(badges: &[YouTubeBadge]) -> Vec<Role> {
+    ranked(badges.iter().filter_map(|badge| match badge {
+        YouTubeBadge::Member(_) => Some(Role::SubT1),
+        YouTubeBadge::Moderator => Some(Role::Mod),
+        YouTubeBadge::Owner => None,
+    }))
+}
+
+/// Sorted, without duplicates; a chatter with no role is a Pleb.
+fn ranked(roles: impl Iterator<Item = Role>) -> Vec<Role> {
+    let mut roles: Vec<Role> = roles.collect();
     roles.sort();
     roles.dedup();
     if roles.is_empty() {
@@ -223,5 +246,28 @@ mod tests {
             ..Weights::default()
         };
         assert_eq!(w.effective(&[Role::Vip, Role::Mod]), (Role::Mod, 3));
+    }
+
+    #[test]
+    fn kick_subs_founders_and_og_are_sub_tier_1() {
+        assert_eq!(kick_roles(["og"].into_iter()), [Role::SubT1]);
+        assert_eq!(
+            kick_roles(["subscriber", "founder", "vip", "moderator", "sub_gifter"].into_iter()),
+            [Role::SubT1, Role::Vip, Role::Mod]
+        );
+        assert_eq!(
+            kick_roles(["verified", "sub_gifter"].into_iter()),
+            [Role::Pleb]
+        );
+    }
+
+    #[test]
+    fn youtube_members_are_sub_tier_1_and_the_owner_has_no_role() {
+        assert_eq!(
+            youtube_roles(&[YouTubeBadge::Member(None), YouTubeBadge::Moderator]),
+            [Role::SubT1, Role::Mod]
+        );
+        assert_eq!(youtube_roles(&[YouTubeBadge::Owner]), [Role::Pleb]);
+        assert_eq!(youtube_roles(&[]), [Role::Pleb]);
     }
 }

@@ -4,6 +4,7 @@ pub mod config;
 pub mod eligibility;
 pub mod giveaway;
 pub mod matcher;
+pub mod platform;
 pub mod prefs;
 pub mod role;
 pub mod search;

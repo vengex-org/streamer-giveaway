@@ -12,13 +12,14 @@ use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::*;
 use rust_i18n::t;
 
-use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
-use crate::domain::badges;
+use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ChatTarget, ConnectionStatus};
+use crate::domain::badges::{self, BadgeImages};
 use crate::domain::chat::{ChannelLogin, Keyword};
-use crate::domain::config::Config;
+use crate::domain::config::{ChatMode, Config};
 use crate::domain::eligibility::{ActiveWindow, Eligibility, TimeUnit};
 use crate::domain::giveaway::{DrawOutcome, Giveaway, GiveawayState, MessageOutcome};
 use crate::domain::matcher::MatchMode;
+use crate::domain::platform::{KickChannel, Platform, UserKey, YouTubeSource};
 use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
 use crate::domain::role::{Role, Weights};
 use crate::domain::session_log::{self, LogKind, SessionLog};
@@ -68,6 +69,8 @@ enum Notice {
     ChatStopped,
     ChatRejected(String),
     ChannelInvalid(String),
+    KickInvalid(String),
+    YouTubeInvalid(String),
     KeywordEmpty,
     WeightInvalid(Role),
     WindowInvalid,
@@ -83,6 +86,8 @@ impl Notice {
             Notice::ChatStopped => t!("error.chat_stopped"),
             Notice::ChatRejected(cause) => t!("error.chat_rejected", cause = cause),
             Notice::ChannelInvalid(raw) => t!("error.channel_invalid", raw = raw),
+            Notice::KickInvalid(raw) => t!("error.kick_invalid", raw = raw),
+            Notice::YouTubeInvalid(raw) => t!("error.youtube_invalid", raw = raw),
             Notice::KeywordEmpty => t!("error.keyword_empty"),
             Notice::WindowInvalid => t!("error.window_invalid"),
             Notice::LogFailed(cause) => t!("error.log", cause = cause),
@@ -94,7 +99,7 @@ impl Notice {
     }
 }
 
-/// Whether this window reads a real Twitch chat or the simulated one.
+/// Whether this window reads real chats or the simulated one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunMode {
     Live,
@@ -107,7 +112,12 @@ pub struct AppView {
     store: Option<ConfigStore>,
     giveaway: Giveaway,
     commands: async_channel::Sender<ChatCommand>,
-    status: ConnectionStatus,
+    /// Each platform's chat connection; a missing platform is idle.
+    statuses: BTreeMap<Platform, ConnectionStatus>,
+    /// Joins sent whose first status has not come back yet.
+    joining: std::collections::BTreeSet<Platform>,
+    /// The channel each platform's badge pictures belong to, so a reconnect keeps them.
+    badge_channels: HashMap<Platform, ChatTarget>,
     notices: BTreeMap<NoticeSource, Notice>,
     stage: Stage,
     /// Whether the rules step shows its editor (weights and entry conditions).
@@ -117,6 +127,8 @@ pub struct AppView {
     os_language: Language,
     palette: Palette,
     channel_input: Entity<InputState>,
+    kick_input: Entity<InputState>,
+    youtube_input: Entity<InputState>,
     keyword_input: Entity<InputState>,
     weight_inputs: Vec<(Role, Entity<InputState>)>,
     window_input: Entity<InputState>,
@@ -139,8 +151,9 @@ pub struct AppView {
     /// The query `search_hits` were computed for.
     search_hits_query: Option<String>,
     /// Subscriber badge version to picture URL for the connected channel; empty until loaded.
-    badge_images: HashMap<String, String>,
-    badge_fetch: Option<Task<()>>,
+    badge_images: BadgeImages,
+    /// Badge list downloads in flight, one per platform.
+    badge_fetch: HashMap<Platform, Task<()>>,
     /// "Clear history" was pressed once and waits for the confirming second press.
     confirm_clear_history: bool,
     stats_ticker: Option<Task<()>>,
@@ -169,6 +182,18 @@ impl AppView {
             InputState::new(window, cx)
                 .placeholder(t!("step.connect.placeholder"))
                 .default_value(channel.unwrap_or_default())
+        });
+        let kick_channel = config.kick_channel.as_ref().map(|c| c.as_str().to_owned());
+        let kick_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("step.connect.placeholder_kick"))
+                .default_value(kick_channel.unwrap_or_default())
+        });
+        let youtube_source = config.youtube_source.as_ref().map(ToString::to_string);
+        let youtube_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("step.connect.placeholder_youtube"))
+                .default_value(youtube_source.unwrap_or_default())
         });
         let keyword_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -212,7 +237,21 @@ impl AppView {
                 };
                 this.set_language(*choice, window, cx);
             }),
-            cx.subscribe_in(&channel_input, window, Self::on_channel_input),
+            cx.subscribe_in(&channel_input, window, |this, _, event, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.connect(Platform::Twitch, cx);
+                }
+            }),
+            cx.subscribe_in(&kick_input, window, |this, _, event, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.connect(Platform::Kick, cx);
+                }
+            }),
+            cx.subscribe_in(&youtube_input, window, |this, _, event, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.connect(Platform::YouTube, cx);
+                }
+            }),
             cx.subscribe_in(&search_input, window, |this, _, event, _, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.refresh_search(cx);
@@ -261,7 +300,9 @@ impl AppView {
             config,
             store,
             commands: bridge.commands,
-            status: ConnectionStatus::Idle,
+            statuses: BTreeMap::new(),
+            joining: std::collections::BTreeSet::new(),
+            badge_channels: HashMap::new(),
             notices: startup_notice
                 .map(|cause| (NoticeSource::Startup, Notice::Startup(cause)))
                 .into_iter()
@@ -272,6 +313,8 @@ impl AppView {
             os_language,
             palette,
             channel_input,
+            kick_input,
+            youtube_input,
             keyword_input,
             weight_inputs,
             window_input,
@@ -287,8 +330,8 @@ impl AppView {
             search_input,
             search_hits: None,
             search_hits_query: None,
-            badge_images: HashMap::new(),
-            badge_fetch: None,
+            badge_images: BadgeImages::default(),
+            badge_fetch: HashMap::new(),
             confirm_clear_history: false,
             stats_ticker: None,
             _subscriptions: subscriptions,
@@ -313,7 +356,7 @@ impl AppView {
         match event {
             ChatEvent::Message(msg) => {
                 let now = Instant::now();
-                let matched = self.giveaway.matches_keyword(&msg.text);
+                let matched = self.giveaway.matches_keyword(msg.text());
                 let follow = self.entrants_at_bottom();
                 let outcome = self.giveaway.on_message(&msg, &self.config.weights, now);
                 if outcome == MessageOutcome::Entered {
@@ -325,7 +368,7 @@ impl AppView {
                 }
                 if let Some(session) = &mut self.session {
                     let kind = LogKind::from_outcome(outcome, matched);
-                    session.record(now, kind, &msg.user_id, &msg.display_name);
+                    session.record(now, kind, msg.user(), msg.display_name());
                     self.stats.record_message(now);
                     if outcome == MessageOutcome::Entered {
                         self.stats.record_entry(now);
@@ -334,33 +377,26 @@ impl AppView {
                 let replied = self.stage.on_message(&msg, now);
                 outcome != MessageOutcome::Ignored || replied
             }
-            ChatEvent::Status(status) => {
-                if let ConnectionStatus::Connected(channel) = &status {
-                    let joined =
-                        !matches!(&self.status, ConnectionStatus::Connected(c) if c == channel);
-                    if joined {
-                        self.load_badges(channel.clone(), cx);
+            ChatEvent::Status(platform, status) => {
+                self.joining.remove(&platform);
+                // A channel's badge list loads once per channel, not on every reconnect.
+                if let ConnectionStatus::Connected(target) = &status
+                    && self.badge_channels.get(&platform) != Some(target)
+                {
+                    self.badge_channels.insert(platform, target.clone());
+                    match target {
+                        ChatTarget::Twitch(channel) => self.load_badges(channel.clone(), cx),
+                        ChatTarget::Kick(channel) => self.load_kick_badges(channel, cx),
+                        ChatTarget::YouTube(_) => {}
                     }
                 }
-                self.status = status;
+                self.statuses.insert(platform, status);
                 true
             }
             ChatEvent::Rejected(reason) => {
                 self.set_notice(NoticeSource::Chat, Some(Notice::ChatRejected(reason)));
                 true
             }
-        }
-    }
-
-    fn on_channel_input(
-        &mut self,
-        _: &Entity<InputState>,
-        event: &InputEvent,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if matches!(event, InputEvent::PressEnter { .. }) {
-            self.connect(cx);
         }
     }
 
@@ -414,26 +450,83 @@ impl AppView {
         };
     }
 
-    fn connect(&mut self, cx: &mut Context<Self>) {
-        let raw = self.channel_input.read(cx).value();
-        match ChannelLogin::parse(&raw) {
-            Ok(channel) => {
-                self.send(ChatCommand::Join(channel.clone()));
-                self.config.channel = Some(channel);
+    fn status(&self, platform: Platform) -> &ConnectionStatus {
+        const IDLE: &ConnectionStatus = &ConnectionStatus::Idle;
+        self.statuses.get(&platform).unwrap_or(IDLE)
+    }
+
+    /// Whether any chat feeds the giveaway right now.
+    fn any_connected(&self) -> bool {
+        self.statuses
+            .values()
+            .any(|status| matches!(status, ConnectionStatus::Connected(_)))
+    }
+
+    fn input(&self, platform: Platform) -> &Entity<InputState> {
+        match platform {
+            Platform::Twitch => &self.channel_input,
+            Platform::Kick => &self.kick_input,
+            Platform::YouTube => &self.youtube_input,
+        }
+    }
+
+    /// Reads the platform's input and joins that chat; a typo shows a notice instead.
+    fn connect(&mut self, platform: Platform, cx: &mut Context<Self>) {
+        let raw = self.input(platform).read(cx).value().to_string();
+        let target = match platform {
+            Platform::Twitch => ChannelLogin::parse(&raw)
+                .map(ChatTarget::Twitch)
+                .map_err(|_| Notice::ChannelInvalid(raw.clone())),
+            Platform::Kick => KickChannel::parse(&raw)
+                .map(ChatTarget::Kick)
+                .map_err(|_| Notice::KickInvalid(raw.clone())),
+            Platform::YouTube => YouTubeSource::parse(&raw)
+                .map(ChatTarget::YouTube)
+                .map_err(|_| Notice::YouTubeInvalid(raw.clone())),
+        };
+        match target {
+            Ok(target) => {
+                match &target {
+                    ChatTarget::Twitch(channel) => self.config.channel = Some(channel.clone()),
+                    ChatTarget::Kick(channel) => self.config.kick_channel = Some(channel.clone()),
+                    ChatTarget::YouTube(source) => {
+                        self.config.youtube_source = Some(source.clone());
+                    }
+                }
+                self.joining.insert(platform);
+                self.send(ChatCommand::Join(target));
                 self.set_notice(NoticeSource::Channel, None);
                 self.set_notice(NoticeSource::Chat, None);
                 self.save();
             }
-            Err(_) => self.set_notice(
-                NoticeSource::Channel,
-                Some(Notice::ChannelInvalid(raw.to_string())),
-            ),
+            Err(notice) => self.set_notice(NoticeSource::Channel, Some(notice)),
         }
         cx.notify();
     }
 
-    fn disconnect(&mut self, cx: &mut Context<Self>) {
-        self.send(ChatCommand::Leave);
+    fn disconnect(&mut self, platform: Platform, cx: &mut Context<Self>) {
+        self.joining.remove(&platform);
+        self.send(ChatCommand::Leave(platform));
+        cx.notify();
+    }
+
+    /// One platform (and which) or multistream. Every chat the new choice does not read is left,
+    /// also one still connecting, so the giveaway only takes entries from the chats on screen.
+    fn choose_chats(&mut self, mode: ChatMode, platform: Platform, cx: &mut Context<Self>) {
+        self.config.chat_mode = mode;
+        self.config.platform = platform;
+        let open: Vec<Platform> = Platform::ALL
+            .into_iter()
+            .filter(|p| {
+                !matches!(self.status(*p), ConnectionStatus::Idle) || self.joining.contains(p)
+            })
+            .collect();
+        for platform in self.config.chats_to_leave(&open) {
+            self.joining.remove(&platform);
+            self.send(ChatCommand::Leave(platform));
+        }
+        self.set_notice(NoticeSource::Channel, None);
+        self.save();
         cx.notify();
     }
 
@@ -580,9 +673,9 @@ impl AppView {
             .collect();
         match self.giveaway.draw(&weights, &mut rand::rng()) {
             DrawOutcome::Winner(winner) => {
-                self.log_winner(&winner.user_id, &winner.display_name);
+                self.log_winner(&winner.user, &winner.display_name);
                 let reel = stage::reveal_reel(&pool, &winner.display_name, &mut rand::rng());
-                self.send(ChatCommand::WinnerDrawn(winner.user_id.clone()));
+                self.send(ChatCommand::WinnerDrawn(winner.user.clone()));
                 self.stage = Stage::Revealing {
                     reel,
                     frame: 0,
@@ -639,33 +732,61 @@ impl AppView {
     /// Fetches the channel's subscriber badge pictures. A failure only means rows show the role
     /// name without a picture, so it is logged, not shown.
     fn load_badges(&mut self, channel: ChannelLogin, cx: &mut Context<Self>) {
-        self.badge_images.clear();
+        self.load_badge_list(
+            Platform::Twitch,
+            badges::channel_badges_url(&channel),
+            |images, json| badges::subscriber_badge_images(json).map(|i| images.set_twitch(i)),
+            cx,
+        );
+    }
+
+    fn load_kick_badges(&mut self, channel: &KickChannel, cx: &mut Context<Self>) {
+        self.load_badge_list(
+            Platform::Kick,
+            crate::chat::kick_channel_url(channel),
+            |images, json| badges::kick_subscriber_badges(json).map(|t| images.set_kick(t)),
+            cx,
+        );
+    }
+
+    /// Downloads a channel's badge list and stores it with `apply`. A failure only means rows
+    /// show the role name without a picture, so it is logged, not shown.
+    fn load_badge_list(
+        &mut self,
+        platform: Platform,
+        url: String,
+        apply: fn(&mut BadgeImages, &str) -> Result<(), serde_json::Error>,
+        cx: &mut Context<Self>,
+    ) {
+        self.badge_images.clear(platform);
         let client = cx.http_client();
-        let url = badges::channel_badges_url(&channel);
-        self.badge_fetch = Some(cx.spawn(
-            async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-                let images = async {
-                    use futures::AsyncReadExt as _;
-                    let mut response = client
-                        .get(&url, http_client::AsyncBody::empty(), true)
-                        .await?;
-                    anyhow::ensure!(response.status().is_success(), "HTTP {}", response.status());
-                    let mut body = String::new();
-                    response.body_mut().read_to_string(&mut body).await?;
-                    Ok::<_, anyhow::Error>(badges::subscriber_badge_images(&body)?)
-                }
-                .await;
-                match images {
-                    Ok(images) => {
-                        let _ = this.update(cx, |view, cx| {
-                            view.badge_images = images;
-                            cx.notify();
-                        });
-                    }
-                    Err(err) => tracing::warn!("channel badges not loaded: {err:#}"),
-                }
-            },
-        ));
+        let task = cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let body = async {
+                use futures::AsyncReadExt as _;
+                let mut response = client
+                    .get(&url, http_client::AsyncBody::empty(), true)
+                    .await?;
+                anyhow::ensure!(response.status().is_success(), "HTTP {}", response.status());
+                let mut body = String::new();
+                response.body_mut().read_to_string(&mut body).await?;
+                Ok::<_, anyhow::Error>(body)
+            }
+            .await;
+            let applied = match body {
+                Ok(body) => this
+                    .update(cx, |view, cx| {
+                        let applied = apply(&mut view.badge_images, &body);
+                        cx.notify();
+                        applied
+                    })
+                    .and_then(|applied| applied.map_err(anyhow::Error::from)),
+                Err(err) => Err(err),
+            };
+            if let Err(err) = applied {
+                tracing::warn!(%platform, "channel badges not loaded: {err:#}");
+            }
+        });
+        self.badge_fetch.insert(platform, task);
     }
 
     /// Starts this app again in demo mode, as a second window with its own settings, so the
@@ -687,16 +808,12 @@ impl AppView {
     }
 
     /// Adds a drawn winner to the log of the giveaway they were drawn from.
-    fn log_winner(&mut self, user_id: &str, display_name: &str) {
+    fn log_winner(&mut self, user: &UserKey, display_name: &str) {
         let Some(log) = &self.last_log else {
             return;
         };
-        let row = session_log::csv_row(
-            log.opened_at.elapsed(),
-            LogKind::Winner,
-            user_id,
-            display_name,
-        );
+        let row =
+            session_log::csv_row(log.opened_at.elapsed(), LogKind::Winner, user, display_name);
         if let Err(err) = storage::append_session_row(&log.path, &row) {
             self.set_notice(NoticeSource::Log, Some(Notice::LogFailed(err.to_string())));
         }
@@ -782,6 +899,12 @@ impl AppView {
         self.save();
         self.channel_input.update(cx, |input, cx| {
             input.set_placeholder(t!("step.connect.placeholder"), window, cx)
+        });
+        self.kick_input.update(cx, |input, cx| {
+            input.set_placeholder(t!("step.connect.placeholder_kick"), window, cx)
+        });
+        self.youtube_input.update(cx, |input, cx| {
+            input.set_placeholder(t!("step.connect.placeholder_youtube"), window, cx)
         });
         self.keyword_input.update(cx, |input, cx| {
             input.set_placeholder(t!("step.keyword.placeholder"), window, cx)

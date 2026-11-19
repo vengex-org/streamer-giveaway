@@ -54,7 +54,7 @@ impl WinnerWatch {
 
     /// Records the message when the winner wrote it; returns whether it was theirs.
     pub fn on_message(&mut self, msg: &ChatMessage, now: Instant) -> bool {
-        if msg.user_id != self.winner.user_id {
+        if *msg.user() != self.winner.user {
             return false;
         }
         let after = now.saturating_duration_since(self.drawn_at);
@@ -63,7 +63,7 @@ impl WinnerWatch {
         }
         self.replies.push(Reply {
             after,
-            text: msg.text.clone(),
+            text: msg.text().to_owned(),
         });
         true
     }
@@ -80,11 +80,12 @@ impl WinnerWatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::platform::{Platform, UserKey};
     use crate::domain::role::Role;
 
     fn winner() -> Entrant {
         Entrant {
-            user_id: "7".into(),
+            user: UserKey::new(Platform::Twitch, "7"),
             display_name: "Lucky".into(),
             roles: vec![Role::Pleb],
             sub_badge: None,
@@ -92,12 +93,7 @@ mod tests {
     }
 
     fn msg(user_id: &str, text: &str) -> ChatMessage {
-        ChatMessage {
-            user_id: user_id.into(),
-            display_name: "x".into(),
-            badges: vec![],
-            text: text.into(),
-        }
+        ChatMessage::twitch(user_id, "x", text, &[])
     }
 
     #[test]

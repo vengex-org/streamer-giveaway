@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use crate::domain::platform::Platform;
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
 use gpui_kit::*;
 use serde_json::json;
@@ -178,6 +179,29 @@ fn theme_config(theme: ThemeChoice) -> ThemeConfig {
         }
     });
     serde_json::from_value(value).expect("built-in theme matches the ThemeConfig schema")
+}
+
+/// Each platform's brand color, for its logo.
+pub(super) fn platform_color(platform: Platform) -> Hsla {
+    match platform {
+        Platform::Twitch => rgb(0x9146ff).into(),
+        Platform::Kick => rgb(0x53fc18).into(),
+        Platform::YouTube => rgb(0xff0033).into(),
+    }
+}
+
+/// The platform's logo at `size` pixels.
+pub(super) fn platform_logo(platform: Platform, size: f32) -> Svg {
+    let path = match platform {
+        Platform::Twitch => "platforms/twitch.svg",
+        Platform::Kick => "platforms/kick.svg",
+        Platform::YouTube => "platforms/youtube.svg",
+    };
+    svg()
+        .path(path)
+        .size(px(size))
+        .flex_none()
+        .text_color(platform_color(platform))
 }
 
 #[cfg(test)]

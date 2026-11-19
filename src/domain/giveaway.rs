@@ -4,20 +4,21 @@ use std::time::Instant;
 use indexmap::IndexMap;
 use rand::{Rng, RngExt};
 
-use super::chat::{ChatMessage, Keyword};
+use super::chat::{ChatMessage, Keyword, SubBadge};
 use super::eligibility::{ActivityLog, Eligibility};
 use super::matcher::{MatchMode, matches};
-use super::role::{Role, Weights, roles_from_badges};
+use super::platform::UserKey;
+use super::role::{Role, Weights};
 
 /// A chatter who entered the giveaway.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entrant {
-    pub user_id: String,
+    pub user: UserKey,
     pub display_name: String,
     /// Last known roles: refreshed by every later message of this user.
     pub roles: Vec<Role>,
-    /// Last known subscriber badge version, for the channel's badge picture.
-    pub sub_badge: Option<String>,
+    /// Last known subscriber badge, for the channel's badge picture.
+    pub sub_badge: Option<SubBadge>,
 }
 
 impl Entrant {
@@ -57,9 +58,9 @@ pub struct Giveaway {
     keyword: Keyword,
     mode: MatchMode,
     state: GiveawayState,
-    entrants: IndexMap<String, Entrant>,
-    /// User ids drawn since the last reset; they cannot enter again.
-    winners: HashSet<String>,
+    entrants: IndexMap<UserKey, Entrant>,
+    /// Accounts drawn since the last reset; they cannot enter again.
+    winners: HashSet<UserKey>,
     eligibility: Eligibility,
     activity: ActivityLog,
 }
@@ -129,38 +130,38 @@ impl Giveaway {
         weights: &Weights,
         now: Instant,
     ) -> MessageOutcome {
-        if msg.is_broadcaster() {
+        if msg.is_owner() {
             return MessageOutcome::Ignored;
         }
-        let matched = matches(self.mode, &self.keyword, &msg.text);
+        let matched = matches(self.mode, &self.keyword, msg.text());
         if !matched {
             self.activity
-                .record(&msg.user_id, now, self.eligibility.active_window.duration());
+                .record(msg.user(), now, self.eligibility.active_window.duration());
         }
-        let roles = roles_from_badges(&msg.badges);
-        if let Some(entrant) = self.entrants.get_mut(&msg.user_id) {
+        let roles = msg.roles().to_vec();
+        if let Some(entrant) = self.entrants.get_mut(msg.user()) {
             entrant.roles = roles;
-            entrant.sub_badge = msg.subscriber_badge();
-            entrant.display_name.clone_from(&msg.display_name);
+            entrant.sub_badge = msg.sub_badge().cloned();
+            msg.display_name().clone_into(&mut entrant.display_name);
             return MessageOutcome::AlreadyEntered;
         }
         let entering = self.state == GiveawayState::Open
-            && !self.winners.contains(&msg.user_id)
+            && !self.winners.contains(msg.user())
             && matched
             && weights.effective(&roles).1 > 0
             && self
                 .eligibility
-                .allows(&roles, self.activity.last(&msg.user_id), now);
+                .allows(&roles, self.activity.last(msg.user()), now);
         if !entering {
             return MessageOutcome::Ignored;
         }
         self.entrants.insert(
-            msg.user_id.clone(),
+            msg.user().clone(),
             Entrant {
-                user_id: msg.user_id.clone(),
-                display_name: msg.display_name.clone(),
+                user: msg.user().clone(),
+                display_name: msg.display_name().to_owned(),
                 roles,
-                sub_badge: msg.subscriber_badge(),
+                sub_badge: msg.sub_badge().cloned(),
             },
         );
         MessageOutcome::Entered
@@ -195,7 +196,7 @@ impl Giveaway {
             .entrants
             .shift_remove_index(index)
             .expect("index comes from the same map");
-        self.winners.insert(winner.user_id.clone());
+        self.winners.insert(winner.user.clone());
         DrawOutcome::Winner(winner)
     }
 
@@ -226,15 +227,12 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
-    use crate::domain::chat::Badge;
+    use crate::domain::chat::{Badge, KickBadge, YouTubeBadge};
+    use crate::domain::platform::Platform;
 
     fn msg(user_id: &str, text: &str, badges: &[(&str, &str)]) -> ChatMessage {
-        ChatMessage {
-            user_id: user_id.into(),
-            display_name: format!("User{user_id}"),
-            badges: badges.iter().map(|(n, v)| Badge::new(*n, *v)).collect(),
-            text: text.into(),
-        }
+        let badges: Vec<Badge> = badges.iter().map(|(n, v)| Badge::new(*n, *v)).collect();
+        ChatMessage::twitch(user_id, format!("User{user_id}"), text, &badges)
     }
 
     fn open_giveaway() -> Giveaway {
@@ -244,7 +242,7 @@ mod tests {
     }
 
     fn ids(g: &Giveaway) -> Vec<&str> {
-        g.entrants().map(|e| e.user_id.as_str()).collect()
+        g.entrants().map(|e| e.user.id.as_str()).collect()
     }
 
     #[test]
@@ -356,7 +354,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(7);
         assert_eq!(ids(&g), ["1", "2"]);
         match g.draw(&weights, &mut rng) {
-            DrawOutcome::Winner(w) => assert_eq!(w.user_id, "2"),
+            DrawOutcome::Winner(w) => assert_eq!(w.user.id, "2"),
             other => panic!("expected winner, got {other:?}"),
         }
         assert_eq!(g.draw(&weights, &mut rng), DrawOutcome::NoDrawable);
@@ -385,7 +383,7 @@ mod tests {
         let DrawOutcome::Winner(second) = g.draw(&Weights::default(), &mut rng) else {
             panic!("expected a second winner");
         };
-        assert_ne!(first.user_id, second.user_id);
+        assert_ne!(first.user, second.user);
         assert_eq!(
             g.draw(&Weights::default(), &mut rng),
             DrawOutcome::EmptyPool
@@ -411,7 +409,7 @@ mod tests {
         let sub_wins = (0..rounds)
             .filter(|_| {
                 let mut g = pool.clone();
-                matches!(g.draw(&weights, &mut rng), DrawOutcome::Winner(w) if w.user_id == "sub")
+                matches!(g.draw(&weights, &mut rng), DrawOutcome::Winner(w) if w.user.id == "sub")
             })
             .count();
         let share = sub_wins as f64 / rounds as f64;
@@ -569,5 +567,72 @@ mod tests {
                 (Role::Mod, 0),
             ]
         );
+    }
+
+    #[test]
+    fn the_same_id_on_two_platforms_enters_twice_and_one_account_once() {
+        let mut g = open_giveaway();
+        let weights = Weights::default();
+        let now = Instant::now();
+        let kick = |id: &str| ChatMessage::kick(id, "K", "YEP", &[]);
+        assert_eq!(
+            g.on_message(&msg("42", "YEP", &[]), &weights, now),
+            MessageOutcome::Entered
+        );
+        assert_eq!(
+            g.on_message(&kick("42"), &weights, now),
+            MessageOutcome::Entered
+        );
+        assert_eq!(
+            g.on_message(&kick("42"), &weights, now),
+            MessageOutcome::AlreadyEntered
+        );
+        let platforms: Vec<Platform> = g.entrants().map(|e| e.user.platform).collect();
+        assert_eq!(platforms, [Platform::Twitch, Platform::Kick]);
+    }
+
+    #[test]
+    fn chats_of_all_platforms_feed_one_giveaway() {
+        let mut g = open_giveaway();
+        let weights = Weights::default();
+        let now = Instant::now();
+        let sub = KickBadge {
+            kind: "subscriber".into(),
+            months: Some(3),
+        };
+        let moderator = [YouTubeBadge::Moderator];
+        g.on_message(&msg("1", "YEP", &[]), &weights, now);
+        g.on_message(&ChatMessage::kick("2", "K", "YEP", &[sub]), &weights, now);
+        g.on_message(
+            &ChatMessage::youtube("UC3", "Y", "YEP", &moderator),
+            &weights,
+            now,
+        );
+        g.on_message(
+            &ChatMessage::youtube("UC4", "Y", "nope", &[]),
+            &weights,
+            now,
+        );
+        let roles: Vec<Role> = g.entrants().map(|e| e.effective(&weights).0).collect();
+        assert_eq!(roles, [Role::Pleb, Role::SubT1, Role::Mod]);
+    }
+
+    #[test]
+    fn kick_and_youtube_owners_never_enter() {
+        let mut g = open_giveaway();
+        let weights = Weights::default();
+        let now = Instant::now();
+        let kick_owner = KickBadge {
+            kind: "broadcaster".into(),
+            months: None,
+        };
+        let kick = ChatMessage::kick("1", "K", "YEP", &[kick_owner]);
+        let youtube = ChatMessage::youtube("UC1", "Y", "YEP", &[YouTubeBadge::Owner]);
+        assert_eq!(g.on_message(&kick, &weights, now), MessageOutcome::Ignored);
+        assert_eq!(
+            g.on_message(&youtube, &weights, now),
+            MessageOutcome::Ignored
+        );
+        assert_eq!(g.entrants().len(), 0);
     }
 }

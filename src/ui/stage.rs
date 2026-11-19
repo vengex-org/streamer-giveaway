@@ -12,7 +12,9 @@ use rand::seq::IndexedRandom;
 use rust_i18n::t;
 
 use super::AppView;
+use super::palette;
 use crate::domain::chat::ChatMessage;
+use crate::domain::config::ChatMode;
 use crate::domain::giveaway::{Entrant, GiveawayState};
 use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
@@ -208,8 +210,18 @@ impl AppView {
 
     /// The channel's badge picture for this entrant's sub badge, once the badge list loaded.
     pub(super) fn badge_image(&self, entrant: &Entrant, size: f32) -> Option<Img> {
-        let url = self.badge_images.get(entrant.sub_badge.as_deref()?)?;
-        Some(img(SharedUri::from(url.clone())).size(px(size)).flex_none())
+        let url = self.badge_images.picture(entrant.sub_badge.as_ref()?)?;
+        Some(
+            img(SharedUri::from(url.as_str().to_owned()))
+                .size(px(size))
+                .flex_none(),
+        )
+    }
+
+    /// Where the entrant came from, shown only in multistream: with one chat it says nothing.
+    pub(super) fn platform_mark(&self, entrant: &Entrant, size: f32) -> Option<Svg> {
+        (self.config.chat_mode == ChatMode::Multi)
+            .then(|| palette::platform_logo(entrant.user.platform, size))
     }
 
     fn render_entrants(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -309,6 +321,7 @@ impl AppView {
                                     .border_b_1()
                                     .border_color(p.surface_alt)
                                     .when(weight == 0, |row| row.text_color(p.muted))
+                                    .children(this.platform_mark(entrant, 16.))
                                     .child(
                                         div()
                                             .flex_1()
@@ -452,6 +465,7 @@ impl AppView {
                     .gap_2()
                     .items_center()
                     .text_color(p.muted)
+                    .children(self.platform_mark(winner, 24.))
                     .children(self.badge_image(winner, 28.))
                     .child(i18n::role_label(role)),
             )
@@ -519,6 +533,7 @@ mod tests {
     use super::{Duration, REVEAL_FRAMES, Stage, format_clock, reveal_reel};
     use crate::domain::chat::ChatMessage;
     use crate::domain::giveaway::Entrant;
+    use crate::domain::platform::{Platform, UserKey};
     use crate::domain::role::Role;
     use crate::domain::winner::{WaitState, WinnerWatch};
 
@@ -554,7 +569,7 @@ mod tests {
     fn a_reply_during_the_reveal_counts() {
         let drawn_at = Instant::now();
         let winner = Entrant {
-            user_id: "7".into(),
+            user: UserKey::new(Platform::Twitch, "7"),
             display_name: "Lucky".into(),
             roles: vec![Role::Pleb],
             sub_badge: None,
@@ -564,12 +579,7 @@ mod tests {
             frame: 0,
             watch: WinnerWatch::new(winner, drawn_at),
         };
-        let reply = ChatMessage {
-            user_id: "7".into(),
-            display_name: "Lucky".into(),
-            badges: vec![],
-            text: "me!".into(),
-        };
+        let reply = ChatMessage::twitch("7", "Lucky", "me!", &[]);
         assert!(stage.on_message(&reply, drawn_at + Duration::from_secs(1)));
         let Stage::Revealing { watch, .. } = stage else {
             panic!("still revealing");
