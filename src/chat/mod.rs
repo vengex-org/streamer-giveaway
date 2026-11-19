@@ -16,6 +16,21 @@ use crate::domain::platform::{KickChannel, Platform, UserKey, YouTubeSource};
 
 pub use twitch::to_chat_message;
 
+/// Browser-like client identity for Kick and YouTube, whose bot filters turn away requests that
+/// look scripted.
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36     (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+/// Waits between reconnect attempts on Kick and YouTube, then the last one again. A guess, like
+/// Twitch's poll interval: quick after a short drop, slow enough not to hammer a platform during
+/// an outage.
+const BACKOFF: [std::time::Duration; 5] = [
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(5),
+    std::time::Duration::from_secs(10),
+    std::time::Duration::from_secs(30),
+];
+
 /// A chat to read: a Twitch channel, a Kick channel or a YouTube stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatTarget {

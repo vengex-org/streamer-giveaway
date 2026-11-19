@@ -8,26 +8,13 @@ use futures::{SinkExt as _, StreamExt as _};
 use serde::Deserialize;
 use tokio_tungstenite::tungstenite::{self, Message};
 
-use super::{ChatEvent, ChatTarget, ConnectionStatus, FailReason};
+use super::{BACKOFF, ChatEvent, ChatTarget, ConnectionStatus, FailReason, USER_AGENT};
 use crate::domain::chat::{ChatMessage, KickBadge};
 use crate::domain::platform::{KickChannel, Platform};
 
-/// Browser-like client identity; Kick's bot filter turns away requests that look scripted.
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-    (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const ORIGIN: &str = "https://kick.com";
 const TOKEN_URL: &str = "https://web.kick.com/api/v1/realtime/auth/connection";
 const SOCKET_URL: &str = "wss://realtime.us-west-2.platform.kick.com/connection/websocket";
-
-/// Waits between reconnect attempts, then the last one again. A guess, like Twitch's poll
-/// interval: quick for a short drop, slow enough not to hammer Kick during an outage.
-const BACKOFF: [Duration; 5] = [
-    Duration::from_secs(1),
-    Duration::from_secs(2),
-    Duration::from_secs(5),
-    Duration::from_secs(10),
-    Duration::from_secs(30),
-];
 
 /// Guest tokens lived 2699-2700 s in the 2026-11-19 probes; reconnecting a little earlier with a
 /// fresh one avoids being cut off mid-giveaway.
