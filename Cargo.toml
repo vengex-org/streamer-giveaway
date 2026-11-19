@@ -2,8 +2,12 @@
 name = "streamer-giveaway"
 version = "0.1.0"
 edition = "2024"
-description = "Collect Twitch chat giveaway entries by keyword and draw a weighted winner"
+description = "Desktop app for Twitch chat giveaways: keyword entries, bonus tickets, entry conditions and a winner reveal for stream"
 license = "MIT"
+repository = "https://github.com/vengex-org/streamer-giveaway"
+readme = "README.md"
+keywords = ["twitch", "giveaway", "raffle", "streaming", "gpui"]
+categories = ["gui"]
 publish = false
 
 [dependencies]
