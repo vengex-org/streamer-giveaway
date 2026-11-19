@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::input::Input;
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -12,7 +13,7 @@ use rust_i18n::t;
 
 use super::AppView;
 use crate::domain::chat::ChatMessage;
-use crate::domain::giveaway::GiveawayState;
+use crate::domain::giveaway::{Entrant, GiveawayState};
 use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
 
@@ -205,9 +206,35 @@ impl AppView {
             .child(parts.join("  ·  "))
     }
 
+    /// The channel's badge picture for this entrant's sub badge, once the badge list loaded.
+    pub(super) fn badge_image(&self, entrant: &Entrant, size: f32) -> Option<Img> {
+        let url = self.badge_images.get(entrant.sub_badge.as_deref()?)?;
+        Some(img(SharedUri::from(url.clone())).size(px(size)).flex_none())
+    }
+
     fn render_entrants(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let count = self.giveaway.entrants().len();
+        let shown = self.search_hits.as_ref().map_or(count, Vec::len);
+        let search =
+            h_flex()
+                .px_4()
+                .py_2()
+                .gap_3()
+                .items_center()
+                .border_b_1()
+                .border_color(p.border)
+                .child(
+                    Input::new(&self.search_input)
+                        .prefix(Icon::new(IconName::Search).text_color(p.muted))
+                        .cleanable(true)
+                        .flex_1(),
+                )
+                .children(self.search_hits.as_ref().map(|hits| {
+                    div().flex_none().text_sm().text_color(p.muted).child(
+                        t!("stage.search.count", found = hits.len(), total = count).into_owned(),
+                    )
+                }));
         let header = h_flex()
             .px_5()
             .py_2p5()
@@ -226,7 +253,17 @@ impl AppView {
                     .child(t!("stage.list.tickets").into_owned()),
             );
         let body =
-            if count == 0 {
+            if count > 0 && shown == 0 {
+                div()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .p_6()
+                    .text_color(p.muted)
+                    .child(t!("stage.search.none").into_owned())
+                    .into_any_element()
+            } else if count == 0 {
                 v_flex()
                     .flex_1()
                     .items_center()
@@ -252,11 +289,16 @@ impl AppView {
                 // Only the visible rows are built: a big chat can bring thousands of entrants.
                 let rows = uniform_list(
                     "entrants",
-                    count,
+                    shown,
                     cx.processor(|this, range: std::ops::Range<usize>, _, _| {
                         let p = this.palette;
                         range
-                            .filter_map(|i| this.giveaway.entrant_at(i))
+                            .map(|row| {
+                                this.search_hits
+                                    .as_ref()
+                                    .map_or(Some(row), |hits| hits.get(row).copied())
+                            })
+                            .filter_map(|index| this.giveaway.entrant_at(index?))
                             .map(|entrant| {
                                 let (role, weight) = entrant.effective(&this.config.weights);
                                 h_flex()
@@ -274,10 +316,13 @@ impl AppView {
                                             .child(entrant.display_name.clone()),
                                     )
                                     .child(
-                                        div()
+                                        h_flex()
                                             .w(px(120.))
+                                            .gap_1p5()
+                                            .items_center()
                                             .text_sm()
                                             .text_color(p.muted)
+                                            .children(this.badge_image(entrant, 18.))
                                             .child(i18n::role_label(role)),
                                     )
                                     .child(
@@ -307,6 +352,7 @@ impl AppView {
             .rounded_2xl()
             .bg(p.surface)
             .overflow_hidden()
+            .child(search)
             .child(header)
             .child(body)
     }
@@ -401,7 +447,14 @@ impl AppView {
                     .text_color(p.accent_text)
                     .child(winner.display_name.clone()),
             )
-            .child(div().text_color(p.muted).child(i18n::role_label(role)))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .text_color(p.muted)
+                    .children(self.badge_image(winner, 28.))
+                    .child(i18n::role_label(role)),
+            )
             .child(
                 div()
                     .text_size(px(28.))
@@ -504,6 +557,7 @@ mod tests {
             user_id: "7".into(),
             display_name: "Lucky".into(),
             roles: vec![Role::Pleb],
+            sub_badge: None,
         };
         let mut stage = Stage::Revealing {
             reel: vec!["Lucky".into()],

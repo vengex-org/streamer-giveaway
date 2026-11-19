@@ -70,6 +70,8 @@ fn main() {
 
     gpui_kit::application()
         .with_assets(streamer_giveaway::assets::AppAssets)
+        // Loads the channel's badge pictures; nothing else goes over HTTP.
+        .with_http_client(std::sync::Arc::new(reqwest_client::ReqwestClient::new()))
         .run(move |cx| {
             gpui_kit::init(cx);
             let options = WindowOptions {

@@ -4,7 +4,7 @@ mod palette;
 mod stage;
 mod steps;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -13,6 +13,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
+use crate::domain::badges;
 use crate::domain::chat::{ChannelLogin, Keyword};
 use crate::domain::config::Config;
 use crate::domain::eligibility::{ActiveWindow, Eligibility, TimeUnit};
@@ -121,6 +122,14 @@ pub struct AppView {
     /// Read from the logs folder each time the history page opens.
     history: History,
     history_scroll: ScrollHandle,
+    search_input: Entity<InputState>,
+    /// Entrant indices that match the search, best first; `None` while the search is empty.
+    search_hits: Option<Vec<usize>>,
+    /// The query `search_hits` were computed for.
+    search_hits_query: Option<String>,
+    /// Subscriber badge version to picture URL for the connected channel; empty until loaded.
+    badge_images: HashMap<String, String>,
+    badge_fetch: Option<Task<()>>,
     /// "Clear history" was pressed once and waits for the confirming second press.
     confirm_clear_history: bool,
     stats_ticker: Option<Task<()>>,
@@ -172,6 +181,9 @@ impl AppView {
             state
         });
 
+        let search_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("stage.search.placeholder")));
+
         let window_amount = config.eligibility.active_window.amount.to_string();
         let window_input = cx.new(|cx| InputState::new(window, cx).default_value(window_amount));
 
@@ -189,6 +201,12 @@ impl AppView {
                 this.set_language(*choice, window, cx);
             }),
             cx.subscribe_in(&channel_input, window, Self::on_channel_input),
+            cx.subscribe_in(&search_input, window, |this, _, event, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.refresh_search(cx);
+                    cx.notify();
+                }
+            }),
             cx.subscribe_in(&keyword_input, window, Self::on_keyword_input),
             cx.observe_window_appearance(window, |this, window, cx| {
                 this.os_dark = is_dark(window.appearance());
@@ -211,7 +229,7 @@ impl AppView {
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             while let Ok(event) = events.recv().await {
                 let applied = this.update(cx, |view, cx| {
-                    if view.on_chat_event(event) {
+                    if view.on_chat_event(event, cx) {
                         cx.notify();
                     }
                 });
@@ -253,6 +271,11 @@ impl AppView {
             page: Page::Giveaway,
             history: History::Loaded(Vec::new()),
             history_scroll: ScrollHandle::new(),
+            search_input,
+            search_hits: None,
+            search_hits_query: None,
+            badge_images: HashMap::new(),
+            badge_fetch: None,
             confirm_clear_history: false,
             stats_ticker: None,
             _subscriptions: subscriptions,
@@ -273,15 +296,19 @@ impl AppView {
     }
 
     /// Applies a chat event; returns whether anything visible changed.
-    fn on_chat_event(&mut self, event: ChatEvent) -> bool {
+    fn on_chat_event(&mut self, event: ChatEvent, cx: &mut Context<Self>) -> bool {
         match event {
             ChatEvent::Message(msg) => {
                 let now = Instant::now();
                 let matched = self.giveaway.matches_keyword(&msg.text);
                 let follow = self.entrants_at_bottom();
                 let outcome = self.giveaway.on_message(&msg, &self.config.weights, now);
-                if outcome == MessageOutcome::Entered && follow {
-                    self.entrants_scroll.scroll_to_bottom();
+                if outcome == MessageOutcome::Entered {
+                    if self.search_hits.is_some() {
+                        self.search_hits = Some(self.search_matches());
+                    } else if follow {
+                        self.entrants_scroll.scroll_to_bottom();
+                    }
                 }
                 if let Some(session) = &mut self.session {
                     let kind = LogKind::from_outcome(outcome, matched);
@@ -295,6 +322,13 @@ impl AppView {
                 outcome != MessageOutcome::Ignored || replied
             }
             ChatEvent::Status(status) => {
+                if let ConnectionStatus::Connected(channel) = &status {
+                    let joined =
+                        !matches!(&self.status, ConnectionStatus::Connected(c) if c == channel);
+                    if joined {
+                        self.load_badges(channel.clone(), cx);
+                    }
+                }
                 self.status = status;
                 true
             }
@@ -558,6 +592,69 @@ impl AppView {
         max <= px(0.) || -state.base_handle.offset().y >= max - px(20.)
     }
 
+    /// The search query as typed, trimmed.
+    fn search_query(&self, cx: &App) -> String {
+        self.search_input.read(cx).value().trim().to_owned()
+    }
+
+    fn search_matches_for(&self, query: &str) -> Vec<usize> {
+        crate::domain::search::search(
+            query,
+            self.giveaway.entrants().map(|e| e.display_name.as_str()),
+        )
+    }
+
+    fn search_matches(&self) -> Vec<usize> {
+        self.search_hits_query
+            .as_deref()
+            .map(|query| self.search_matches_for(query))
+            .unwrap_or_default()
+    }
+
+    fn refresh_search(&mut self, cx: &mut Context<Self>) {
+        let query = self.search_query(cx);
+        if query.is_empty() {
+            self.search_hits = None;
+            self.search_hits_query = None;
+        } else {
+            self.search_hits = Some(self.search_matches_for(&query));
+            self.search_hits_query = Some(query);
+        }
+        self.entrants_scroll.scroll_to_item(0, ScrollStrategy::Top);
+    }
+
+    /// Fetches the channel's subscriber badge pictures. A failure only means rows show the role
+    /// name without a picture, so it is logged, not shown.
+    fn load_badges(&mut self, channel: ChannelLogin, cx: &mut Context<Self>) {
+        self.badge_images.clear();
+        let client = cx.http_client();
+        let url = badges::channel_badges_url(&channel);
+        self.badge_fetch = Some(cx.spawn(
+            async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                let images = async {
+                    use futures::AsyncReadExt as _;
+                    let mut response = client
+                        .get(&url, http_client::AsyncBody::empty(), true)
+                        .await?;
+                    anyhow::ensure!(response.status().is_success(), "HTTP {}", response.status());
+                    let mut body = String::new();
+                    response.body_mut().read_to_string(&mut body).await?;
+                    Ok::<_, anyhow::Error>(badges::subscriber_badge_images(&body)?)
+                }
+                .await;
+                match images {
+                    Ok(images) => {
+                        let _ = this.update(cx, |view, cx| {
+                            view.badge_images = images;
+                            cx.notify();
+                        });
+                    }
+                    Err(err) => tracing::warn!("channel badges not loaded: {err:#}"),
+                }
+            },
+        ));
+    }
+
     /// Adds a drawn winner to the log of the giveaway they were drawn from.
     fn log_winner(&mut self, user_id: &str, display_name: &str) {
         let Some(log) = &self.last_log else {
@@ -638,6 +735,7 @@ impl AppView {
 
     fn clear_list(&mut self, cx: &mut Context<Self>) {
         self.giveaway.reset();
+        self.refresh_search(cx);
         self.finish_winner(cx);
     }
 

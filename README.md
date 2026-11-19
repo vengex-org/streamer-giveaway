@@ -14,7 +14,8 @@ browser source.
 - Each person enters once, however many times they post. The keyword can be required as a word, as
   the whole message, or anywhere in the message.
 - Subs (tier 1, 2 and 3), VIPs and moderators can get more tickets than regular viewers. A group
-  with 0 tickets cannot enter.
+  with 0 tickets cannot enter. Subscribers show with the channel's own sub badge.
+- A search box above the list finds an entrant by a rough name, so you can tell someone they are in.
 - You can let in only subscribers, or only people who chatted in the last few minutes or hours, so
   people who show up just for the giveaway don't count.
 - The window is built to be captured on stream: a large keyword and entrant count, a short reveal
@@ -65,7 +66,9 @@ The .exe is not signed, so Windows SmartScreen may warn before the first start (
 ## Privacy
 
 The app sends nothing anywhere unless you ask it to. When you connect to a channel it reads that
-channel's Twitch chat anonymously. Settings and giveaway logs stay on your computer.
+channel's Twitch chat anonymously and asks [api.ivr.fi](https://api.ivr.fi), a community Twitch API,
+for the channel's subscriber badge pictures. That request carries only the channel name. Settings
+and giveaway logs stay on your computer.
 
 ## Build and run
 

@@ -29,6 +29,14 @@ impl ChatMessage {
     pub fn is_broadcaster(&self) -> bool {
         self.badges.iter().any(|b| b.name == "broadcaster")
     }
+
+    /// Version of the channel subscriber badge, e.g. `3012`, which picks the badge picture.
+    pub fn subscriber_badge(&self) -> Option<String> {
+        self.badges
+            .iter()
+            .find(|b| b.name == "subscriber")
+            .map(|b| b.version.clone())
+    }
 }
 
 /// Giveaway keyword: trimmed, never empty.

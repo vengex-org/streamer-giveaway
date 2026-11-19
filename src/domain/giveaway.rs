@@ -16,6 +16,8 @@ pub struct Entrant {
     pub display_name: String,
     /// Last known roles: refreshed by every later message of this user.
     pub roles: Vec<Role>,
+    /// Last known subscriber badge version, for the channel's badge picture.
+    pub sub_badge: Option<String>,
 }
 
 impl Entrant {
@@ -138,6 +140,7 @@ impl Giveaway {
         let roles = roles_from_badges(&msg.badges);
         if let Some(entrant) = self.entrants.get_mut(&msg.user_id) {
             entrant.roles = roles;
+            entrant.sub_badge = msg.subscriber_badge();
             entrant.display_name.clone_from(&msg.display_name);
             return MessageOutcome::AlreadyEntered;
         }
@@ -157,6 +160,7 @@ impl Giveaway {
                 user_id: msg.user_id.clone(),
                 display_name: msg.display_name.clone(),
                 roles,
+                sub_badge: msg.subscriber_badge(),
             },
         );
         MessageOutcome::Entered

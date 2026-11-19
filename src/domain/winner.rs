@@ -87,6 +87,7 @@ mod tests {
             user_id: "7".into(),
             display_name: "Lucky".into(),
             roles: vec![Role::Pleb],
+            sub_badge: None,
         }
     }
 

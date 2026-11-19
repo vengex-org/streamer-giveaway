@@ -672,3 +672,23 @@ sk = "Zrušiť"
 en = "Cancel"
 cs = "Zrušit"
 es = "Cancelar"
+
+# Entrant search
+
+[stage.search.placeholder]
+sk = "Nájdi prihláseného podľa mena"
+en = "Find an entrant by name"
+cs = "Najdi přihlášeného podle jména"
+es = "Busca a un inscrito por nombre"
+
+[stage.search.count]
+sk = "%{found} z %{total}"
+en = "%{found} of %{total}"
+cs = "%{found} z %{total}"
+es = "%{found} de %{total}"
+
+[stage.search.none]
+sk = "Nikto s takým menom nie je prihlásený."
+en = "Nobody with that name has entered."
+cs = "Nikdo s takovým jménem není přihlášený."
+es = "Nadie con ese nombre se ha inscrito."

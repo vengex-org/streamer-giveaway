@@ -6,7 +6,7 @@ use gpui_kit::{AssetSource, SharedString};
 
 gpui_kit::assets::icon_assets!(
     ExtraIcons,
-    [Trophy, MessagesSquare, MessageCircleMore, SunMoon]
+    [Trophy, MessagesSquare, MessageCircleMore, SunMoon, Search]
 );
 
 /// Our extra icons first, then the widget library's own assets.
