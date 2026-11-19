@@ -1,10 +1,12 @@
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::select::{Select, SelectItem};
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use super::AppView;
+use super::{AppView, Page};
 use crate::chat::ConnectionStatus;
 use crate::domain::prefs::{Language, ThemeChoice};
 use crate::i18n;
@@ -74,19 +76,39 @@ impl AppView {
             ),
         };
 
-        let chosen_theme = self.config.theme;
-        let themes = [
-            (None, t!("header.theme.system")),
-            (Some(ThemeChoice::Light), t!("header.theme.light")),
-            (Some(ThemeChoice::Dark), t!("header.theme.dark")),
+        // One button walks System, Light, Dark; its icon and tooltip say which is on.
+        let (theme_icon, theme_label, next_theme) = match self.config.theme {
+            None => (
+                IconName::SunMoon,
+                t!("header.theme.system"),
+                Some(ThemeChoice::Light),
+            ),
+            Some(ThemeChoice::Light) => (
+                IconName::Sun,
+                t!("header.theme.light"),
+                Some(ThemeChoice::Dark),
+            ),
+            Some(ThemeChoice::Dark) => (IconName::Moon, t!("header.theme.dark"), None),
+        };
+        let theme = Button::new("theme")
+            .ghost()
+            .icon(theme_icon)
+            .tooltip(t!("header.theme.tooltip", theme = theme_label).into_owned())
+            .on_click(
+                cx.listener(move |this, _, window, cx| this.set_theme(next_theme, window, cx)),
+            );
+        let pages = [
+            (Page::Giveaway, t!("nav.giveaway")),
+            (Page::History, t!("nav.history")),
         ]
-        .map(|(theme, label)| {
-            Button::new(SharedString::from(format!("theme-{theme:?}")))
-                .xsmall()
-                .ghost()
+        .map(|(page, label)| {
+            let selected = self.page == page;
+            Button::new(SharedString::from(format!("page-{page:?}")))
+                .small()
+                .when(selected, |b| b.primary())
+                .when(!selected, |b| b.ghost())
                 .label(label.into_owned())
-                .selected(chosen_theme == theme)
-                .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
+                .on_click(cx.listener(move |this, _, _, cx| this.set_page(page, cx)))
         });
 
         h_flex()
@@ -103,6 +125,14 @@ impl AppView {
                     .font_bold()
                     .text_color(p.text)
                     .child(t!("app.title").into_owned()),
+            )
+            .child(
+                h_flex()
+                    .p_0p5()
+                    .gap_0p5()
+                    .rounded_lg()
+                    .bg(p.surface_alt)
+                    .children(pages),
             )
             .child(
                 h_flex()
@@ -128,7 +158,6 @@ impl AppView {
                         .w_full(),
                 ),
             )
-            .child(div().w(px(1.)).h(px(16.)).bg(p.border))
-            .child(h_flex().gap_1().children(themes))
+            .child(theme)
     }
 }

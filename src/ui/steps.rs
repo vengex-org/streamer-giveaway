@@ -1,3 +1,4 @@
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Input;
@@ -182,7 +183,11 @@ impl AppView {
         let has_channel = !matches!(self.status, ConnectionStatus::Idle);
         h_flex()
             .gap_2()
-            .child(Input::new(&self.channel_input).flex_1())
+            .child(
+                Input::new(&self.channel_input)
+                    .prefix(Icon::new(IconName::MessagesSquare).text_color(self.palette.muted))
+                    .flex_1(),
+            )
             .child(if has_channel {
                 Button::new("disconnect")
                     .outline()
@@ -435,6 +440,11 @@ impl AppView {
         let blocked = !open && !connected;
         let button = Button::new("entries")
             .w_full()
+            .icon(if open {
+                IconName::Square
+            } else {
+                IconName::Play
+            })
             .when(open, |b| {
                 b.danger().label(t!("step.entries.close").into_owned())
             })
@@ -480,6 +490,7 @@ impl AppView {
                 Button::new("draw")
                     .large()
                     .w_full()
+                    .icon(IconName::Trophy)
                     .when(active, |b| b.primary())
                     .when(!active, |b| b.outline())
                     .label(t!("step.draw.draw").into_owned())
@@ -487,9 +498,9 @@ impl AppView {
                     .on_click(cx.listener(|this, _, _, cx| this.draw(cx))),
             )
             .children(reason.map(|r| div().text_xs().text_color(p.muted).child(r.into_owned())))
-            .children(self.last_log.as_ref().map(|path| {
+            .children(self.last_log.as_ref().map(|log| {
                 div().text_xs().text_color(p.muted).child(
-                    t!("step.draw.log_saved", path = path.display().to_string()).into_owned(),
+                    t!("step.draw.log_saved", path = log.path.display().to_string()).into_owned(),
                 )
             }))
             .child(

@@ -65,25 +65,27 @@ fn main() {
     }
     .expect("failed to start the chat thread");
 
-    gpui_kit::application().run(move |cx| {
-        gpui_kit::init(cx);
-        let options = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("Streamer Giveaway".into()),
+    gpui_kit::application()
+        .with_assets(streamer_giveaway::assets::AppAssets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+            let options = WindowOptions {
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Streamer Giveaway".into()),
+                    ..Default::default()
+                }),
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(1180.), px(760.)),
+                    cx,
+                ))),
                 ..Default::default()
-            }),
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(1180.), px(760.)),
-                cx,
-            ))),
-            ..Default::default()
-        };
-        gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| AppView::new(bridge, store, config, warning, window, cx))
-        })
-        .expect("failed to open the main window");
-    });
+            };
+            gpui_kit::open_window(options, cx, move |window, cx| {
+                cx.new(|cx| AppView::new(bridge, store, config, warning, window, cx))
+            })
+            .expect("failed to open the main window");
+        });
 }
 
 /// Reads `--demo-viewers=N` and its companions; `None` when no viewer count is given.

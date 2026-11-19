@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::*;
@@ -224,69 +225,82 @@ impl AppView {
                     .text_right()
                     .child(t!("stage.list.tickets").into_owned()),
             );
-        let body = if count == 0 {
-            div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p_6()
-                .text_color(p.muted)
-                .child(t!("stage.list.empty", kw = self.config.keyword.as_str()).into_owned())
-                .into_any_element()
-        } else {
-            // Only the visible rows are built: a big chat can bring thousands of entrants.
-            let rows = uniform_list(
-                "entrants",
-                count,
-                cx.processor(|this, range: std::ops::Range<usize>, _, _| {
-                    let p = this.palette;
-                    range
-                        .filter_map(|i| this.giveaway.entrant_at(i))
-                        .map(|entrant| {
-                            let (role, weight) = entrant.effective(&this.config.weights);
-                            h_flex()
-                                .w_full()
-                                .px_5()
-                                .py_2()
-                                .gap_2()
-                                .border_b_1()
-                                .border_color(p.surface_alt)
-                                .when(weight == 0, |row| row.text_color(p.muted))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .truncate()
-                                        .child(entrant.display_name.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .w(px(120.))
-                                        .text_sm()
-                                        .text_color(p.muted)
-                                        .child(i18n::role_label(role)),
-                                )
-                                .child(
-                                    div()
-                                        .w(px(70.))
-                                        .text_right()
-                                        .font_semibold()
-                                        .child(weight.to_string()),
-                                )
-                        })
-                        .collect::<Vec<_>>()
-                }),
-            )
-            .track_scroll(&self.entrants_scroll)
-            .size_full();
-            div()
-                .relative()
-                .flex_1()
-                .min_h_0()
-                .child(rows)
-                .child(Scrollbar::vertical(&self.entrants_scroll).viewport_from_layout())
-                .into_any_element()
-        };
+        let body =
+            if count == 0 {
+                v_flex()
+                    .flex_1()
+                    .items_center()
+                    .justify_center()
+                    .gap_2()
+                    .p_6()
+                    .child(
+                        Icon::new(IconName::MessageCircleMore)
+                            .size(px(44.))
+                            .text_color(p.muted),
+                    )
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_semibold()
+                            .child(t!("stage.list.empty_title").into_owned()),
+                    )
+                    .child(div().text_color(p.muted).child(
+                        t!("stage.list.empty", kw = self.config.keyword.as_str()).into_owned(),
+                    ))
+                    .into_any_element()
+            } else {
+                // Only the visible rows are built: a big chat can bring thousands of entrants.
+                let rows = uniform_list(
+                    "entrants",
+                    count,
+                    cx.processor(|this, range: std::ops::Range<usize>, _, _| {
+                        let p = this.palette;
+                        range
+                            .filter_map(|i| this.giveaway.entrant_at(i))
+                            .map(|entrant| {
+                                let (role, weight) = entrant.effective(&this.config.weights);
+                                h_flex()
+                                    .w_full()
+                                    .px_5()
+                                    .py_2()
+                                    .gap_2()
+                                    .border_b_1()
+                                    .border_color(p.surface_alt)
+                                    .when(weight == 0, |row| row.text_color(p.muted))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .truncate()
+                                            .child(entrant.display_name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(120.))
+                                            .text_sm()
+                                            .text_color(p.muted)
+                                            .child(i18n::role_label(role)),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(70.))
+                                            .text_right()
+                                            .font_semibold()
+                                            .child(weight.to_string()),
+                                    )
+                            })
+                            .collect::<Vec<_>>()
+                    }),
+                )
+                .track_scroll(&self.entrants_scroll)
+                .size_full();
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(rows)
+                    .child(Scrollbar::vertical(&self.entrants_scroll).viewport_from_layout())
+                    .into_any_element()
+            };
         v_flex()
             .flex_1()
             .min_h_0()

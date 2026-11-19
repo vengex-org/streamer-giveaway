@@ -1,4 +1,5 @@
 mod header;
+mod history;
 mod palette;
 mod stage;
 mod steps;
@@ -19,14 +20,28 @@ use crate::domain::giveaway::{DrawOutcome, Giveaway, GiveawayState, MessageOutco
 use crate::domain::matcher::MatchMode;
 use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
 use crate::domain::role::{Role, Weights};
-use crate::domain::session_log::{LogKind, SessionLog};
+use crate::domain::session_log::{self, LogKind, SessionLog};
 use crate::domain::stats::ChatStats;
 use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
 use crate::storage::{self, ConfigStore};
 use header::{LanguageOption, language_options};
+use history::History;
 use palette::Palette;
 use stage::{Stage, TICK};
+
+/// The two screens: running a giveaway, and the list of past ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Page {
+    Giveaway,
+    History,
+}
+
+/// A giveaway log on disk and when its entries opened, so later rows get the right time.
+struct SavedLog {
+    path: std::path::PathBuf,
+    opened_at: Instant,
+}
 
 /// What a notice is about. Each source replaces or clears only its own notice, so fixing one
 /// problem never hides another that still exists.
@@ -100,8 +115,11 @@ pub struct AppView {
     stats: ChatStats,
     /// Every message while entries are open; written to CSV when they close.
     session: Option<SessionLog>,
-    /// Where the last giveaway log was written.
-    last_log: Option<std::path::PathBuf>,
+    /// The last giveaway log written; winners drawn later are added to it.
+    last_log: Option<SavedLog>,
+    page: Page,
+    /// Read from the logs folder each time the history page opens.
+    history: History,
     stats_ticker: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -229,6 +247,8 @@ impl AppView {
             stats: ChatStats::default(),
             session: None,
             last_log: None,
+            page: Page::Giveaway,
+            history: History::Loaded(Vec::new()),
             stats_ticker: None,
             _subscriptions: subscriptions,
         }
@@ -481,7 +501,10 @@ impl AppView {
         match storage::write_session_log(&dir, &stamp, &session.to_csv()) {
             Ok(path) => {
                 self.set_notice(NoticeSource::Log, None);
-                self.last_log = Some(path);
+                self.last_log = Some(SavedLog {
+                    path,
+                    opened_at: session.opened_at(),
+                });
             }
             Err(err) => {
                 self.set_notice(NoticeSource::Log, Some(Notice::LogFailed(err.to_string())))
@@ -501,6 +524,7 @@ impl AppView {
             .collect();
         match self.giveaway.draw(&weights, &mut rand::rng()) {
             DrawOutcome::Winner(winner) => {
+                self.log_winner(&winner.user_id, &winner.display_name);
                 let reel = stage::reveal_reel(&pool, &winner.display_name, &mut rand::rng());
                 self.send(ChatCommand::WinnerDrawn(winner.user_id.clone()));
                 self.stage = Stage::Revealing {
@@ -513,6 +537,30 @@ impl AppView {
             // The draw buttons are disabled with the reason shown whenever nobody can win.
             DrawOutcome::EmptyPool | DrawOutcome::NoDrawable => {}
         }
+        cx.notify();
+    }
+
+    /// Adds a drawn winner to the log of the giveaway they were drawn from.
+    fn log_winner(&mut self, user_id: &str, display_name: &str) {
+        let Some(log) = &self.last_log else {
+            return;
+        };
+        let row = session_log::csv_row(
+            log.opened_at.elapsed(),
+            LogKind::Winner,
+            user_id,
+            display_name,
+        );
+        if let Err(err) = storage::append_session_row(&log.path, &row) {
+            self.set_notice(NoticeSource::Log, Some(Notice::LogFailed(err.to_string())));
+        }
+    }
+
+    fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
+        if page == Page::History {
+            self.history = history::load_history();
+        }
+        self.page = page;
         cx.notify();
     }
 
@@ -636,13 +684,20 @@ impl Render for AppView {
             .bg(p.bg)
             .text_color(p.text)
             .child(self.render_header(window, cx))
-            .child(
-                div()
+            .child(match self.page {
+                Page::Giveaway => div()
                     .flex()
                     .flex_1()
                     .min_h_0()
                     .child(self.render_steps(can_win, cx))
-                    .child(self.render_stage(can_win, cx)),
-            )
+                    .child(self.render_stage(can_win, cx))
+                    .into_any_element(),
+                Page::History => div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.render_history(cx))
+                    .into_any_element(),
+            })
     }
 }

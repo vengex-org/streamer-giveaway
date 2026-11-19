@@ -323,11 +323,17 @@ en = "Tickets"
 cs = "Losy"
 es = "Boletos"
 
+[stage.list.empty_title]
+sk = "Zatiaľ nikto"
+en = "No entries yet"
+cs = "Zatím nikdo"
+es = "Nadie todavía"
+
 [stage.list.empty]
-sk = "Zatiaľ nikto. Otvor prihlášky a povedz chatu, nech napíše %{kw}."
-en = "No one yet. Open entries and tell chat to type %{kw}."
-cs = "Zatím nikdo. Otevři přihlášky a řekni chatu, ať napíše %{kw}."
-es = "Nadie todavía. Abre la participación y pide al chat que escriba %{kw}."
+sk = "Otvor prihlášky a povedz chatu, nech napíše %{kw}."
+en = "Open entries and tell chat to type %{kw}."
+cs = "Otevři přihlášky a řekni chatu, ať napíše %{kw}."
+es = "Abre la participación y pide al chat que escriba %{kw}."
 
 [winner.drawing]
 sk = "Žrebujem…"
@@ -558,3 +564,87 @@ sk = "Hotovo"
 en = "Done"
 cs = "Hotovo"
 es = "Listo"
+
+# Theme button
+
+[header.theme.tooltip]
+sk = "Téma: %{theme}. Klikni pre ďalšiu."
+en = "Theme: %{theme}. Click for the next one."
+cs = "Téma: %{theme}. Klikni pro další."
+es = "Tema: %{theme}. Haz clic para cambiar."
+
+# Pages
+
+[nav.giveaway]
+sk = "Giveaway"
+en = "Giveaway"
+cs = "Giveaway"
+es = "Sorteo"
+
+[nav.history]
+sk = "História"
+en = "History"
+cs = "Historie"
+es = "Historial"
+
+# History page
+
+[history.open_folder]
+sk = "Otvoriť priečinok"
+en = "Open folder"
+cs = "Otevřít složku"
+es = "Abrir carpeta"
+
+[history.empty]
+sk = "Zatiaľ žiadny giveaway. Log sa uloží, keď zavrieš prihlášky alebo vyžrebuješ víťaza."
+en = "No giveaways yet. A log is saved when you close entries or draw a winner."
+cs = "Zatím žádný giveaway. Log se uloží, když zavřeš přihlášky nebo vylosuješ vítěze."
+es = "Aún no hay sorteos. El registro se guarda al cerrar la participación o sortear un ganador."
+
+[history.list_failed]
+sk = "Logy sa nedajú načítať: %{cause}"
+en = "Could not read the logs: %{cause}"
+cs = "Logy se nedají načíst: %{cause}"
+es = "No se pudieron leer los registros: %{cause}"
+
+[history.unreadable]
+sk = "Tento log sa nedá prečítať: %{cause}"
+en = "This log cannot be read: %{cause}"
+cs = "Tento log se nedá přečíst: %{cause}"
+es = "No se puede leer este registro: %{cause}"
+
+[history.col.when]
+sk = "Kedy"
+en = "When"
+cs = "Kdy"
+es = "Cuándo"
+
+[history.col.open]
+sk = "Otvorené"
+en = "Open for"
+cs = "Otevřeno"
+es = "Abierto"
+
+[history.col.entrants]
+sk = "Prihlásení"
+en = "Entrants"
+cs = "Přihlášení"
+es = "Participantes"
+
+[history.col.messages]
+sk = "Správy"
+en = "Messages"
+cs = "Zprávy"
+es = "Mensajes"
+
+[history.col.ninety]
+sk = "90 % prihlášok do"
+en = "90% of entries in"
+cs = "90 % přihlášek do"
+es = "90 % dentro en"
+
+[history.col.winners]
+sk = "Víťazi"
+en = "Winners"
+cs = "Vítězové"
+es = "Ganadores"
