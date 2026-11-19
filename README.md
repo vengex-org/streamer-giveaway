@@ -21,14 +21,15 @@ browser source.
   in the last minute and how long ago the last one came in, so you can see when entries dry up.
   When entries close, the app saves a CSV log with the time and kind of every message (no message
   text) for measuring the giveaway afterwards.
-- Four numbered steps with a short hint guide first-time users. The next step is highlighted, and
-  a button you cannot press yet says why.
+- Five numbered steps with a short hint guide first-time users. The next step is highlighted, and
+  a button you cannot press yet says why. The Rules step always shows who can enter and how many
+  tickets each group gets, so you don't have to look for them.
 - There is a dark and a light theme, and the app speaks English, Slovak, Czech and Spanish. Both
   follow your system settings until you pick one, and "Auto" or "System" goes back to that.
 
-| Entries coming in | Winner answered | Entry conditions, light theme |
+| Entries coming in | Winner answered | Editing the rules, light theme |
 |---|---|---|
-| ![Entries](docs/entries-dark.png) | ![Winner](docs/winner-dark.png) | ![Conditions](docs/conditions-light.png) |
+| ![Entries](docs/entries-dark.png) | ![Winner](docs/winner-dark.png) | ![Rules](docs/conditions-light.png) |
 
 ## Try it without a stream
 
@@ -88,10 +89,11 @@ The first build takes several minutes.
 ## How to run a giveaway
 
 1. Type your Twitch channel name and press Connect.
-2. Type the word viewers should write and press Enter. Open "Bonus tickets" or "Who can enter" if
-   you need them.
-3. Press "Open entries" and tell chat the keyword.
-4. Press "Draw winner". Entries close, names flash for a moment, and then the winner shows with a
+2. Type the word viewers should write and press Enter.
+3. Check the rules. "Edit rules" lets you limit who can enter and give subs, VIPs or moderators
+   more tickets.
+4. Press "Open entries" and tell chat the keyword.
+5. Press "Draw winner". Entries close, names flash for a moment, and then the winner shows with a
    stopwatch. When they write in chat, their messages appear in the panel. "Draw another" picks
    someone else, since a winner cannot win twice. "Clear list" starts over.
 
