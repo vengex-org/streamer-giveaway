@@ -403,8 +403,12 @@ impl AppView {
                 {
                     self.badge_channels.insert(platform, target.clone());
                     match target {
-                        ChatTarget::Twitch(channel) => self.load_badges(channel.clone(), cx),
-                        ChatTarget::Kick(channel) => self.load_kick_badges(channel, cx),
+                        ChatTarget::Twitch(channel) => {
+                            self.load_badges(target.clone(), channel.clone(), cx)
+                        }
+                        ChatTarget::Kick(channel) => {
+                            self.load_kick_badges(target.clone(), channel, cx)
+                        }
                         ChatTarget::YouTube(_) => {}
                     }
                 }
@@ -789,18 +793,23 @@ impl AppView {
 
     /// Fetches the channel's subscriber badge pictures. A failure only means rows show the role
     /// name without a picture, so it is logged, not shown.
-    fn load_badges(&mut self, channel: ChannelLogin, cx: &mut Context<Self>) {
+    fn load_badges(&mut self, target: ChatTarget, channel: ChannelLogin, cx: &mut Context<Self>) {
         self.load_badge_list(
-            Platform::Twitch,
+            target,
             badges::channel_badges_url(&channel),
             |images, json| badges::subscriber_badge_images(json).map(|i| images.set_twitch(i)),
             cx,
         );
     }
 
-    fn load_kick_badges(&mut self, channel: &KickChannel, cx: &mut Context<Self>) {
+    fn load_kick_badges(
+        &mut self,
+        target: ChatTarget,
+        channel: &KickChannel,
+        cx: &mut Context<Self>,
+    ) {
         self.load_badge_list(
-            Platform::Kick,
+            target,
             crate::chat::kick_channel_url(channel),
             |images, json| badges::kick_subscriber_badges(json).map(|t| images.set_kick(t)),
             cx,
@@ -808,14 +817,16 @@ impl AppView {
     }
 
     /// Downloads a channel's badge list and stores it with `apply`. A failure only means rows
-    /// show the role name without a picture, so it is logged, not shown.
+    /// show the role name without a picture, so it is logged, not shown, and the next connect to
+    /// the same channel tries again.
     fn load_badge_list(
         &mut self,
-        platform: Platform,
+        target: ChatTarget,
         url: String,
         apply: fn(&mut BadgeImages, &str) -> Result<(), serde_json::Error>,
         cx: &mut Context<Self>,
     ) {
+        let platform = target.platform();
         self.badge_images.clear(platform);
         let client = cx.http_client();
         let task = cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
@@ -842,6 +853,12 @@ impl AppView {
             };
             if let Err(err) = applied {
                 tracing::warn!(%platform, "channel badges not loaded: {err:#}");
+                this.update(cx, |view, _| {
+                    if view.badge_channels.get(&platform) == Some(&target) {
+                        view.badge_channels.remove(&platform);
+                    }
+                })
+                .ok();
             }
         });
         self.badge_fetch.insert(platform, task);
