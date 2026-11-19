@@ -173,8 +173,8 @@ fn theme_config(theme: ThemeChoice) -> ThemeConfig {
             "danger.foreground": css(s.bg),
             "success.background": css(s.success),
             "success.foreground": css(s.bg),
-            "scrollbar.thumb.background": css(s.border),
-            "scrollbar.thumb.hover.background": css(s.muted)
+            "scrollbar.thumb.background": css(s.muted),
+            "scrollbar.thumb.hover.background": css(s.text)
         }
     });
     serde_json::from_value(value).expect("built-in theme matches the ThemeConfig schema")

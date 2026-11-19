@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -298,7 +298,7 @@ impl AppView {
                     .flex_1()
                     .min_h_0()
                     .child(rows)
-                    .child(Scrollbar::vertical(&self.entrants_scroll).viewport_from_layout())
+                    .child(Scrollbar::vertical(&self.entrants_scroll).mode(ScrollbarMode::Always))
                     .into_any_element()
             };
         v_flex()

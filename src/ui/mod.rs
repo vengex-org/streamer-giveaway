@@ -120,6 +120,9 @@ pub struct AppView {
     page: Page,
     /// Read from the logs folder each time the history page opens.
     history: History,
+    history_scroll: ScrollHandle,
+    /// "Clear history" was pressed once and waits for the confirming second press.
+    confirm_clear_history: bool,
     stats_ticker: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -249,6 +252,8 @@ impl AppView {
             last_log: None,
             page: Page::Giveaway,
             history: History::Loaded(Vec::new()),
+            history_scroll: ScrollHandle::new(),
+            confirm_clear_history: false,
             stats_ticker: None,
             _subscriptions: subscriptions,
         }
@@ -273,7 +278,11 @@ impl AppView {
             ChatEvent::Message(msg) => {
                 let now = Instant::now();
                 let matched = self.giveaway.matches_keyword(&msg.text);
+                let follow = self.entrants_at_bottom();
                 let outcome = self.giveaway.on_message(&msg, &self.config.weights, now);
+                if outcome == MessageOutcome::Entered && follow {
+                    self.entrants_scroll.scroll_to_bottom();
+                }
                 if let Some(session) = &mut self.session {
                     let kind = LogKind::from_outcome(outcome, matched);
                     session.record(now, kind, &msg.user_id, &msg.display_name);
@@ -540,6 +549,15 @@ impl AppView {
         cx.notify();
     }
 
+    /// Whether the entrants list shows its last rows (or does not scroll yet). New entrants keep
+    /// such a list pinned to the bottom; someone reading further up stays where they are.
+    fn entrants_at_bottom(&self) -> bool {
+        let state = self.entrants_scroll.0.borrow();
+        let max = state.base_handle.max_offset().y;
+        // Within about half a row of the end counts as the end.
+        max <= px(0.) || -state.base_handle.offset().y >= max - px(20.)
+    }
+
     /// Adds a drawn winner to the log of the giveaway they were drawn from.
     fn log_winner(&mut self, user_id: &str, display_name: &str) {
         let Some(log) = &self.last_log else {
@@ -560,6 +578,7 @@ impl AppView {
         if page == Page::History {
             self.history = history::load_history();
         }
+        self.confirm_clear_history = false;
         self.page = page;
         cx.notify();
     }
