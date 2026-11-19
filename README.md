@@ -2,11 +2,21 @@
 
 # Streamer Giveaway
 
-A desktop app for Twitch chat giveaways. Viewers enter by typing a keyword in chat, the app counts
-each person once, and you draw a winner on stream. You don't need a bot account, a login or a
-browser source.
+A free desktop app for Twitch chat giveaways. Viewers enter by typing a keyword in chat, the app
+counts each person once, and you draw a winner live on stream. You don't need a bot account, a
+login or a browser source.
+
+**[Download for Windows](https://github.com/vengex-org/streamer-giveaway/releases/latest)**
 
 ![Drawing a winner and waiting for their answer](docs/winner-draw.gif)
+
+## Why a desktop app
+
+- Chat goes straight from Twitch to your PC. An entry shows up the moment its message arrives,
+  with no web dashboard or cloud bot in between.
+- Setup takes a minute: type your channel name, pick a keyword, open entries.
+- You can rehearse before going live. Demo mode plays a whole giveaway for any audience size, for
+  example 8000 viewers.
 
 ## Features
 
@@ -32,9 +42,9 @@ browser source.
   follow your system settings until you pick one in the header, and "Auto" or "System" goes back
   to that.
 
-| Entries coming in | Winner answered | Editing the rules, light theme |
+| Entries coming in (8000-viewer demo) | Winner answered | Rules and search, light theme |
 |---|---|---|
-| ![Entries](docs/entries-dark.png) | ![Winner](docs/winner-dark.png) | ![Rules](docs/conditions-light.png) |
+| ![Entries](docs/entries-dark.png) | ![Winner](docs/winner-dark.png) | ![Rules and search](docs/rules-search-light.png) |
 
 ## Try it without a stream
 
