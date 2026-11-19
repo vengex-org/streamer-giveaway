@@ -18,9 +18,11 @@ use crate::domain::giveaway::{DrawOutcome, Giveaway, GiveawayState, MessageOutco
 use crate::domain::matcher::MatchMode;
 use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
 use crate::domain::role::{Role, Weights};
+use crate::domain::session_log::{LogKind, SessionLog};
+use crate::domain::stats::ChatStats;
 use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
-use crate::storage::ConfigStore;
+use crate::storage::{self, ConfigStore};
 use palette::Palette;
 use stage::{Stage, TICK};
 
@@ -35,6 +37,7 @@ enum NoticeSource {
     Keyword,
     Weight(Role),
     Window,
+    Log,
 }
 
 /// A problem to show, kept untranslated so a language switch re-renders it.
@@ -48,6 +51,7 @@ enum Notice {
     KeywordEmpty,
     WeightInvalid(Role),
     WindowInvalid,
+    LogFailed(String),
 }
 
 impl Notice {
@@ -60,6 +64,7 @@ impl Notice {
             Notice::ChannelInvalid(raw) => t!("error.channel_invalid", raw = raw),
             Notice::KeywordEmpty => t!("error.keyword_empty"),
             Notice::WindowInvalid => t!("error.window_invalid"),
+            Notice::LogFailed(cause) => t!("error.log", cause = cause),
             Notice::WeightInvalid(role) => {
                 t!("error.weight_invalid", role = i18n::role_label(*role))
             }
@@ -88,6 +93,13 @@ pub struct AppView {
     window_input: Entity<InputState>,
     entrants_scroll: UniformListScrollHandle,
     ticker: Option<Task<()>>,
+    /// Throughput while entries are open.
+    stats: ChatStats,
+    /// Every message while entries are open; written to CSV when they close.
+    session: Option<SessionLog>,
+    /// Where the last giveaway log was written.
+    last_log: Option<std::path::PathBuf>,
+    stats_ticker: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -198,6 +210,10 @@ impl AppView {
             window_input,
             entrants_scroll: UniformListScrollHandle::new(),
             ticker: None,
+            stats: ChatStats::default(),
+            session: None,
+            last_log: None,
+            stats_ticker: None,
             _subscriptions: subscriptions,
         }
     }
@@ -220,10 +236,18 @@ impl AppView {
         match event {
             ChatEvent::Message(msg) => {
                 let now = Instant::now();
-                let entered = self.giveaway.on_message(&msg, &self.config.weights, now)
-                    != MessageOutcome::Ignored;
+                let matched = self.giveaway.matches_keyword(&msg.text);
+                let outcome = self.giveaway.on_message(&msg, &self.config.weights, now);
+                if let Some(session) = &mut self.session {
+                    let kind = LogKind::from_outcome(outcome, matched);
+                    session.record(now, kind, &msg.user_id, &msg.display_name);
+                    self.stats.record_message(now);
+                    if outcome == MessageOutcome::Entered {
+                        self.stats.record_entry(now);
+                    }
+                }
                 let replied = self.stage.on_message(&msg, now);
-                entered || replied
+                outcome != MessageOutcome::Ignored || replied
             }
             ChatEvent::Status(status) => {
                 self.status = status;
@@ -388,17 +412,70 @@ impl AppView {
 
     fn toggle_entries(&mut self, cx: &mut Context<Self>) {
         match self.giveaway.state() {
-            GiveawayState::Open => self.giveaway.close(),
+            GiveawayState::Open => {
+                self.giveaway.close();
+                self.finish_session();
+            }
             GiveawayState::Closed => {
                 if self.commit_rule(self.config.mode, cx) {
                     self.giveaway.open();
+                    self.start_session(cx);
                 }
             }
         }
         cx.notify();
     }
 
+    /// Starts measuring: fresh stats, a new log, and a once-per-second refresh of the stats line.
+    fn start_session(&mut self, cx: &mut Context<Self>) {
+        self.session = Some(SessionLog::new(Instant::now()));
+        self.stats = ChatStats::default();
+        self.stats_ticker = Some(cx.spawn(
+            async move |this: WeakEntity<Self>, cx: &mut AsyncApp| loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(1))
+                    .await;
+                let open = this
+                    .update(cx, |view, cx| {
+                        cx.notify();
+                        view.session.is_some()
+                    })
+                    .unwrap_or(false);
+                if !open {
+                    break;
+                }
+            },
+        ));
+    }
+
+    /// Writes the log of the entries that just closed. A failure is shown, never blocks.
+    fn finish_session(&mut self) {
+        self.stats_ticker = None;
+        let Some(session) = self.session.take() else {
+            return;
+        };
+        let Some(dir) = ConfigStore::logs_dir() else {
+            self.set_notice(
+                NoticeSource::Log,
+                Some(Notice::LogFailed("no user data folder".into())),
+            );
+            return;
+        };
+        let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%SZ").to_string();
+        match storage::write_session_log(&dir, &stamp, &session.to_csv()) {
+            Ok(path) => {
+                self.set_notice(NoticeSource::Log, None);
+                self.last_log = Some(path);
+            }
+            Err(err) => {
+                self.set_notice(NoticeSource::Log, Some(Notice::LogFailed(err.to_string())))
+            }
+        }
+    }
+
     fn draw(&mut self, cx: &mut Context<Self>) {
+        // Drawing closes entries; the log of this giveaway ends here.
+        self.finish_session();
         let weights = self.config.weights;
         let pool: Vec<String> = self
             .giveaway

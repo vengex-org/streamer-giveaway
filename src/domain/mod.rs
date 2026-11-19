@@ -5,4 +5,6 @@ pub mod giveaway;
 pub mod matcher;
 pub mod prefs;
 pub mod role;
+pub mod session_log;
+pub mod stats;
 pub mod winner;

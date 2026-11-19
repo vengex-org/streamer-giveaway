@@ -103,6 +103,11 @@ impl Giveaway {
         self.winners.clear();
     }
 
+    /// Whether `text` contains the keyword under the current rule.
+    pub fn matches_keyword(&self, text: &str) -> bool {
+        matches(self.mode, &self.keyword, text)
+    }
+
     /// The entrant at `index` in entry order.
     pub fn entrant_at(&self, index: usize) -> Option<&Entrant> {
         self.entrants.get_index(index).map(|(_, entrant)| entrant)

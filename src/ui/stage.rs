@@ -88,6 +88,9 @@ impl AppView {
             .p_6()
             .gap_5()
             .child(self.render_stats(can_win))
+            .when(self.session.is_some(), |stage| {
+                stage.child(self.render_live_stats())
+            })
             .child(body)
     }
 
@@ -164,6 +167,30 @@ impl AppView {
                 t!("stage.entered").into_owned(),
             ))
             .child(number_card(can_win, t!("stage.can_win").into_owned()))
+    }
+
+    fn render_live_stats(&self) -> impl IntoElement {
+        let p = self.palette;
+        let now = Instant::now();
+        let rate = format!("{:.1}", self.stats.messages_per_second(now));
+        let last = match self.stats.since_last_entry(now) {
+            Some(ago) => t!("stage.stats.last", ago = format_clock(ago)),
+            None => t!("stage.stats.none"),
+        };
+        let item = |text: String| div().px_3().py_1().rounded_md().bg(p.surface).child(text);
+        h_flex()
+            .gap_3()
+            .text_sm()
+            .text_color(p.muted)
+            .child(item(t!("stage.stats.rate", rate = rate).into_owned()))
+            .child(item(
+                t!(
+                    "stage.stats.new",
+                    count = self.stats.entries_last_minute(now)
+                )
+                .into_owned(),
+            ))
+            .child(item(last.into_owned()))
     }
 
     fn render_entrants(&self, cx: &mut Context<Self>) -> impl IntoElement {

@@ -518,3 +518,41 @@ sk = "Ďalší už nemá kto vyhrať."
 en = "Nobody else can win."
 cs = "Už nemá kdo další vyhrát."
 es = "Nadie más puede ganar."
+
+# Live stats and the giveaway log
+
+[stage.stats.rate]
+sk = "%{rate} správ/s"
+en = "%{rate} msg/s"
+cs = "%{rate} zpráv/s"
+es = "%{rate} mensajes/s"
+
+[stage.stats.new]
+sk = "%{count} nových za minútu"
+en = "%{count} new in the last minute"
+cs = "%{count} nových za minutu"
+es = "%{count} nuevos en el último minuto"
+
+[stage.stats.last]
+sk = "posledná prihláška pred %{ago}"
+en = "last new entry %{ago} ago"
+cs = "poslední přihláška před %{ago}"
+es = "última participación hace %{ago}"
+
+[stage.stats.none]
+sk = "zatiaľ žiadna prihláška"
+en = "no entries yet"
+cs = "zatím žádná přihláška"
+es = "aún no hay participantes"
+
+[step.draw.log_saved]
+sk = "Log uložený: %{path}"
+en = "Log saved: %{path}"
+cs = "Log uložen: %{path}"
+es = "Registro guardado: %{path}"
+
+[error.log]
+sk = "Log sa nepodarilo uložiť: %{cause}"
+en = "Could not save the log: %{cause}"
+cs = "Log se nepodařilo uložit: %{cause}"
+es = "No se pudo guardar el registro: %{cause}"

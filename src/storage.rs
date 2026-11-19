@@ -1,5 +1,5 @@
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, io};
 
@@ -47,6 +47,11 @@ impl ConfigStore {
     pub fn demo_in_user_config_dir() -> Option<Self> {
         ProjectDirs::from("", "", "streamer-giveaway")
             .map(|dirs| Self::at(dirs.config_dir().join("demo.toml")))
+    }
+
+    /// Folder for the giveaway logs (CSV), e.g. `%APPDATA%\streamer-giveaway\data\logs`.
+    pub fn logs_dir() -> Option<PathBuf> {
+        ProjectDirs::from("", "", "streamer-giveaway").map(|dirs| dirs.data_dir().join("logs"))
     }
 
     /// Where the app kept its settings while it was called yep-giveaway.
@@ -158,6 +163,14 @@ impl ConfigStore {
     }
 }
 
+/// Writes one giveaway log as `<dir>/giveaway-<stamp>.csv` and returns its path.
+pub fn write_session_log(dir: &Path, stamp: &str, csv: &str) -> io::Result<PathBuf> {
+    fs::create_dir_all(dir)?;
+    let path = dir.join(format!("giveaway-{stamp}.csv"));
+    fs::write(&path, csv)?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +225,14 @@ mod tests {
             .expect("warning for an unreadable legacy file");
         assert!(warning.contains("old"), "{warning}");
         assert!(!store.path.exists());
+    }
+
+    #[test]
+    fn session_log_is_written_under_its_stamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session_log(&dir.path().join("logs"), "20261120-180311Z", "a\n").unwrap();
+        assert!(path.ends_with("giveaway-20261120-180311Z.csv"));
+        assert_eq!(fs::read_to_string(path).unwrap(), "a\n");
     }
 
     #[test]

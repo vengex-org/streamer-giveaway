@@ -450,6 +450,11 @@ impl AppView {
                     .on_click(cx.listener(|this, _, _, cx| this.draw(cx))),
             )
             .children(reason.map(|r| div().text_xs().text_color(p.muted).child(r.into_owned())))
+            .children(self.last_log.as_ref().map(|path| {
+                div().text_xs().text_color(p.muted).child(
+                    t!("step.draw.log_saved", path = path.display().to_string()).into_owned(),
+                )
+            }))
             .child(
                 h_flex()
                     .gap_2()
