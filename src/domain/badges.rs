@@ -28,13 +28,18 @@ struct BadgeVersion {
     image_url_2x: String,
 }
 
-/// Subscriber badge version (as chat sends it) to image URL.
+/// Twitch's badge image host. The list comes from a third party, so any other address is dropped
+/// and the app never loads a URL it was merely told to load.
+const BADGE_CDN: &str = "https://static-cdn.jtvnw.net/";
+
+/// Subscriber badge version (as chat sends it) to image URL, keeping only Twitch CDN images.
 pub fn subscriber_badge_images(json: &str) -> Result<HashMap<String, String>, serde_json::Error> {
     let sets: Vec<BadgeSet> = serde_json::from_str(json)?;
     Ok(sets
         .into_iter()
         .filter(|set| set.set_id == "subscriber")
         .flat_map(|set| set.versions)
+        .filter(|version| version.image_url_2x.starts_with(BADGE_CDN))
         .map(|version| (version.id, version.image_url_2x))
         .collect())
 }
@@ -48,13 +53,24 @@ mod tests {
         let json = r#"[
             {"set_id":"bits","versions":[{"id":"100","image_url_2x":"https://b/100"}]},
             {"set_id":"subscriber","versions":[
-                {"id":"0","image_url_2x":"https://s/0","title":"Subscriber"},
-                {"id":"3012","image_url_2x":"https://s/3012"}
+                {"id":"0","image_url_2x":"https://static-cdn.jtvnw.net/badges/v1/a/2","title":"Subscriber"},
+                {"id":"3012","image_url_2x":"https://static-cdn.jtvnw.net/badges/v1/b/2"}
             ]}
         ]"#;
         let images = subscriber_badge_images(json).unwrap();
         assert_eq!(images.len(), 2);
-        assert_eq!(images["3012"], "https://s/3012");
+        assert_eq!(images["3012"], "https://static-cdn.jtvnw.net/badges/v1/b/2");
+    }
+
+    #[test]
+    fn images_outside_the_twitch_cdn_are_dropped() {
+        let json = r#"[{"set_id":"subscriber","versions":[
+            {"id":"0","image_url_2x":"http://static-cdn.jtvnw.net/badges/v1/a/2"},
+            {"id":"3","image_url_2x":"https://static-cdn.jtvnw.net.evil.example/x"},
+            {"id":"6","image_url_2x":"file:///C:/Windows/win.ini"},
+            {"id":"9","image_url_2x":"http://127.0.0.1:8080/admin"}
+        ]}]"#;
+        assert!(subscriber_badge_images(json).unwrap().is_empty());
     }
 
     #[test]
