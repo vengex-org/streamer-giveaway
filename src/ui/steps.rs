@@ -22,7 +22,7 @@ const CHECK: &str = "\u{2713}";
 
 /// The steps the guide points at, in order. Setting the rules is optional, so it is never
 /// the step to do next.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Step {
     Connect,
     Keyword,
@@ -68,6 +68,25 @@ impl AppView {
             draw_in_progress: !matches!(self.stage, Stage::List),
         });
 
+        let (dot, chats) = self.chats_status_line();
+        let connect_summary = h_flex()
+            .gap_1p5()
+            .items_center()
+            .min_w_0()
+            .child(div().size(px(6.)).flex_none().rounded_full().bg(dot))
+            .child(div().text_sm().text_color(p.muted).truncate().child(chats))
+            .into_any_element();
+        let keyword_summary = div()
+            .text_sm()
+            .text_color(p.muted)
+            .truncate()
+            .child(format!(
+                "{} \u{b7} {}",
+                self.config.keyword.as_str(),
+                i18n::mode_label(self.config.mode)
+            ))
+            .into_any_element();
+
         let notices = self.notices.values().map(|notice| {
             div()
                 .px_3()
@@ -92,21 +111,41 @@ impl AppView {
             .border_r_1()
             .border_color(p.border)
             .children(notices)
-            .child(self.step_section(
-                1,
-                next == Some(Step::Connect),
-                connected,
+            .child(self.foldable_step(
+                Step::Connect,
+                (next == Some(Step::Connect), connected),
                 t!("step.connect.title").into_owned(),
-                self.connect_hint(),
-                self.render_connect(next == Some(Step::Connect), cx),
+                connect_summary,
+                |this, cx| {
+                    this.step_section(
+                        1,
+                        next == Some(Step::Connect),
+                        connected,
+                        t!("step.connect.title").into_owned(),
+                        this.connect_hint(),
+                        this.render_connect(next == Some(Step::Connect), cx),
+                    )
+                    .into_any_element()
+                },
+                cx,
             ))
-            .child(self.step_section(
-                2,
-                next == Some(Step::Keyword),
-                connected && keyword_text_valid,
+            .child(self.foldable_step(
+                Step::Keyword,
+                (next == Some(Step::Keyword), connected && keyword_text_valid),
                 t!("step.keyword.title").into_owned(),
-                t!("step.keyword.hint").into_owned(),
-                self.render_keyword(cx),
+                keyword_summary,
+                |this, cx| {
+                    this.step_section(
+                        2,
+                        next == Some(Step::Keyword),
+                        connected && keyword_text_valid,
+                        t!("step.keyword.title").into_owned(),
+                        t!("step.keyword.hint").into_owned(),
+                        this.render_keyword(cx),
+                    )
+                    .into_any_element()
+                },
+                cx,
             ))
             .child(self.step_section(
                 3,
@@ -136,6 +175,71 @@ impl AppView {
                 t!("step.draw.hint").into_owned(),
                 self.render_draw(next == Some(Step::Draw), can_win, cx),
             ))
+    }
+
+    /// A finished step that is not the one to do now folds into its title and a one-line
+    /// summary, so the buttons of the later steps fit on a laptop screen. Its title toggles it.
+    fn foldable_step(
+        &self,
+        step: Step,
+        (active, done): (bool, bool),
+        title: String,
+        summary: AnyElement,
+        full: impl FnOnce(&Self, &mut Context<Self>) -> AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let foldable = done && !active;
+        let unfolded = self.unfolded_steps.contains(&step);
+        let toggle = cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
+            if !this.unfolded_steps.remove(&step) {
+                this.unfolded_steps.insert(step);
+            }
+            cx.notify();
+        });
+        if !foldable {
+            return full(self, cx);
+        }
+        let p = self.palette;
+        let chevron = Button::new(SharedString::from(format!("fold-{step:?}")))
+            .xsmall()
+            .ghost()
+            .icon(if unfolded {
+                IconName::ChevronUp
+            } else {
+                IconName::ChevronDown
+            })
+            .tooltip(if unfolded {
+                t!("step.fold").into_owned()
+            } else {
+                t!("step.unfold").into_owned()
+            })
+            .on_click(toggle);
+        if unfolded {
+            return div()
+                .relative()
+                .child(full(self, cx))
+                .child(div().absolute().top_2().right_2().child(chevron))
+                .into_any_element();
+        }
+        v_flex()
+            .p_3()
+            .gap_1()
+            .rounded_xl()
+            .bg(p.surface)
+            .border_1()
+            .border_color(p.border)
+            .child(
+                h_flex()
+                    .gap_2()
+                    .text_sm()
+                    .font_semibold()
+                    .items_center()
+                    .child(div().w(px(14.)).text_color(p.muted).child(CHECK))
+                    .child(div().flex_1().child(title))
+                    .child(chevron),
+            )
+            .child(div().pl(px(22.)).child(summary))
+            .into_any_element()
     }
 
     /// One step as a grouped section: a caption with its number above a rounded container. The

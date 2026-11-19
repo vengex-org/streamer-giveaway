@@ -123,6 +123,8 @@ pub struct AppView {
     stage: Stage,
     /// Whether the rules step shows its editor (weights and entry conditions).
     rules_open: bool,
+    /// Finished steps the streamer unfolded to change them; the others fold into one line.
+    unfolded_steps: std::collections::HashSet<steps::Step>,
     os_dark: bool,
     /// The OS language, read once at startup.
     os_language: Language,
@@ -320,6 +322,7 @@ impl AppView {
                 .collect(),
             stage: Stage::List,
             rules_open: false,
+            unfolded_steps: std::collections::HashSet::new(),
             os_dark,
             os_language,
             palette,

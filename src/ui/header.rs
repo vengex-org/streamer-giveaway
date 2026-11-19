@@ -47,10 +47,7 @@ pub(super) fn language_options() -> Vec<LanguageOption> {
 impl AppView {
     pub(super) fn render_header(&self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
-        let (dot, status) = match self.config.chat_mode {
-            ChatMode::Single => self.status_line(self.status(self.config.platform)),
-            ChatMode::Multi => self.multi_status_line(),
-        };
+        let (dot, status) = self.chats_status_line();
 
         // One button walks System, Light, Dark; its icon and tooltip say which is on.
         let (theme_icon, theme_label, next_theme) = match self.config.theme {
@@ -236,6 +233,13 @@ impl AppView {
 
     /// Multistream: how many of the started chats are read now. Red when one of them has a
     /// problem, so it is noticed even though the details sit in step 1.
+    pub(super) fn chats_status_line(&self) -> (Hsla, String) {
+        match self.config.chat_mode {
+            ChatMode::Single => self.status_line(self.status(self.config.platform)),
+            ChatMode::Multi => self.multi_status_line(),
+        }
+    }
+
     fn multi_status_line(&self) -> (Hsla, String) {
         let p = self.palette;
         let started: Vec<&ConnectionStatus> = self

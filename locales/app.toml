@@ -79,6 +79,18 @@ en = "Connect to your chat"
 cs = "Připoj se k chatu"
 es = "Conéctate a tu chat"
 
+[step.fold]
+sk = "Zbaliť"
+en = "Collapse"
+cs = "Sbalit"
+es = "Contraer"
+
+[step.unfold]
+sk = "Rozbaliť a upraviť"
+en = "Expand to change"
+cs = "Rozbalit a upravit"
+es = "Desplegar para cambiar"
+
 [step.connect.hint]
 sk = "Napíš názov Twitch kanála alebo vlož odkaz na stream. Odkaz na Kick alebo YouTube prepne platformu."
 en = "Type your Twitch channel name or paste your stream link. A Kick or YouTube link switches the platform."
