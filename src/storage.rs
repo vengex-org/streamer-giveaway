@@ -205,6 +205,15 @@ pub fn session_logs(dir: &Path) -> io::Result<Vec<(String, PathBuf)>> {
     Ok(logs)
 }
 
+/// Deletes every giveaway log in `dir` and returns how many it removed. Other files stay.
+pub fn delete_session_logs(dir: &Path) -> io::Result<usize> {
+    let logs = session_logs(dir)?;
+    for (_, path) in &logs {
+        fs::remove_file(path)?;
+    }
+    Ok(logs.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,6 +299,16 @@ mod tests {
             .map(|(stamp, _)| stamp)
             .collect();
         assert_eq!(stamps, ["20261120-180311Z", "20261119-090000Z"]);
+    }
+
+    #[test]
+    fn deleting_logs_keeps_other_files() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session_log(dir.path(), "20261119-090000Z", "x").unwrap();
+        fs::write(dir.path().join("notes.txt"), "x").unwrap();
+        assert_eq!(delete_session_logs(dir.path()).unwrap(), 1);
+        assert!(session_logs(dir.path()).unwrap().is_empty());
+        assert!(dir.path().join("notes.txt").exists());
     }
 
     #[test]

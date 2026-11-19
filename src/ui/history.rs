@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use chrono::{Local, NaiveDateTime, TimeZone, Utc};
 use gpui_kit::component::IconName;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use rust_i18n::t;
@@ -52,6 +53,17 @@ pub(super) fn load_history() -> History {
                 })
                 .collect(),
         ),
+        Err(err) => History::Failed(err.to_string()),
+    }
+}
+
+/// Deletes every log and reads the folder again; a failure replaces the list with its reason.
+pub(super) fn clear_history() -> History {
+    let Some(dir) = ConfigStore::logs_dir() else {
+        return History::Failed("no user data folder".into());
+    };
+    match storage::delete_session_logs(&dir) {
+        Ok(_) => load_history(),
         Err(err) => History::Failed(err.to_string()),
     }
 }
@@ -115,12 +127,19 @@ impl AppView {
             History::Loaded(entries) if entries.is_empty() => self
                 .history_message(t!("history.empty").into_owned())
                 .into_any_element(),
-            History::Loaded(entries) => v_flex()
-                .id("history-rows")
+            History::Loaded(entries) => div()
+                .relative()
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .children(entries.iter().map(|entry| self.history_row(entry)))
+                .child(
+                    v_flex()
+                        .id("history-rows")
+                        .size_full()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.history_scroll)
+                        .children(entries.iter().map(|entry| self.history_row(entry))),
+                )
+                .child(Scrollbar::vertical(&self.history_scroll).mode(ScrollbarMode::Always))
                 .into_any_element(),
         };
 
@@ -140,6 +159,7 @@ impl AppView {
                             .font_bold()
                             .child(t!("nav.history").into_owned()),
                     )
+                    .child(self.render_clear_history(cx))
                     .child(
                         Button::new("open-logs")
                             .outline()
@@ -161,6 +181,52 @@ impl AppView {
                     .overflow_hidden()
                     .child(header)
                     .child(body),
+            )
+    }
+
+    /// Deleting logs cannot be undone, so the first press only asks; the second one deletes.
+    fn render_clear_history(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let has_logs = matches!(&self.history, History::Loaded(entries) if !entries.is_empty());
+        if !self.confirm_clear_history {
+            return h_flex().child(
+                Button::new("clear-history")
+                    .ghost()
+                    .icon(IconName::Delete)
+                    .label(t!("history.clear").into_owned())
+                    .disabled(!has_logs)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.confirm_clear_history = true;
+                        cx.notify();
+                    })),
+            );
+        }
+        h_flex()
+            .gap_2()
+            .items_center()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(self.palette.danger)
+                    .child(t!("history.clear_confirm").into_owned()),
+            )
+            .child(
+                Button::new("clear-history-yes")
+                    .danger()
+                    .label(t!("history.clear_yes").into_owned())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.history = clear_history();
+                        this.confirm_clear_history = false;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("clear-history-no")
+                    .outline()
+                    .label(t!("history.clear_no").into_owned())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.confirm_clear_history = false;
+                        cx.notify();
+                    })),
             )
     }
 
