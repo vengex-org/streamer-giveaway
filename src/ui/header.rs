@@ -40,21 +40,37 @@ impl AppView {
             ),
         };
 
-        let current = self.language();
+        let chosen_language = self.config.language;
+        let auto_language = Button::new("lang-auto")
+            .xsmall()
+            .ghost()
+            .label(t!("header.lang_auto").into_owned())
+            .selected(chosen_language.is_none())
+            .on_click(cx.listener(|this, _, window, cx| this.set_language(None, window, cx)));
         let languages = Language::ALL.iter().map(|&language| {
             Button::new(SharedString::from(format!("lang-{}", language.code())))
                 .xsmall()
                 .ghost()
                 .label(language.code().to_uppercase())
-                .selected(language == current)
-                .on_click(
-                    cx.listener(move |this, _, window, cx| this.set_language(language, window, cx)),
-                )
+                .selected(chosen_language == Some(language))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.set_language(Some(language), window, cx)
+                }))
         });
-        let theme_label = match self.theme() {
-            ThemeChoice::Dark => t!("header.theme.to_light"),
-            ThemeChoice::Light => t!("header.theme.to_dark"),
-        };
+        let chosen_theme = self.config.theme;
+        let themes = [
+            (None, t!("header.theme.system")),
+            (Some(ThemeChoice::Light), t!("header.theme.light")),
+            (Some(ThemeChoice::Dark), t!("header.theme.dark")),
+        ]
+        .map(|(theme, label)| {
+            Button::new(SharedString::from(format!("theme-{theme:?}")))
+                .xsmall()
+                .ghost()
+                .label(label.into_owned())
+                .selected(chosen_theme == theme)
+                .on_click(cx.listener(move |this, _, window, cx| this.set_theme(theme, window, cx)))
+        });
 
         h_flex()
             .px_5()
@@ -90,13 +106,7 @@ impl AppView {
                     ),
             )
             .child(div().flex_1())
-            .child(h_flex().gap_1().children(languages))
-            .child(
-                Button::new("theme")
-                    .small()
-                    .outline()
-                    .label(theme_label.into_owned())
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_theme(window, cx))),
-            )
+            .child(h_flex().gap_1().child(auto_language).children(languages))
+            .child(h_flex().gap_1().children(themes))
     }
 }

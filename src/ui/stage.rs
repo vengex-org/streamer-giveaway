@@ -10,26 +10,45 @@ use rand::seq::IndexedRandom;
 use rust_i18n::t;
 
 use super::AppView;
-use crate::domain::giveaway::{Entrant, GiveawayState};
+use crate::domain::chat::ChatMessage;
+use crate::domain::giveaway::GiveawayState;
 use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
 
-/// Names shown during the reveal, one per tick; with a 100 ms tick the reveal takes about 2 s.
-pub(super) const REVEAL_FRAMES: usize = 20;
+/// How often the stage ticker runs while a draw is shown: one reveal frame, and often enough for
+/// a stopwatch that changes once per second.
+pub(super) const TICK: Duration = Duration::from_millis(100);
+/// How long the names flash before the winner shows.
+const REVEAL: Duration = Duration::from_secs(2);
+/// Names shown during the reveal, one per tick.
+pub(super) const REVEAL_FRAMES: usize = (REVEAL.as_millis() / TICK.as_millis()) as usize;
 
-/// What the stage shows.
+/// What the stage shows. The winner is followed from the moment of the draw, so a reply sent
+/// during the reveal counts and the stopwatch starts at the draw.
 pub(super) enum Stage {
     List,
     Revealing {
         reel: Vec<String>,
         frame: usize,
-        winner: Entrant,
+        watch: WinnerWatch,
     },
     Winner {
         watch: WinnerWatch,
         /// Last whole second rendered, so the stopwatch redraws once per second.
         shown_second: u64,
     },
+}
+
+impl Stage {
+    /// Passes a chat message to the drawn winner's watch; returns whether it was the winner's.
+    pub(super) fn on_message(&mut self, msg: &ChatMessage, now: Instant) -> bool {
+        match self {
+            Stage::List => false,
+            Stage::Revealing { watch, .. } | Stage::Winner { watch, .. } => {
+                watch.on_message(msg, now)
+            }
+        }
+    }
 }
 
 /// Names to flash before the winner: random names from the pool, ending on the winner.
@@ -52,13 +71,15 @@ pub(super) fn format_clock(duration: Duration) -> String {
 }
 
 impl AppView {
-    pub(super) fn render_stage(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_stage(&self, can_win: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match &self.stage {
             Stage::List => self.render_entrants(cx).into_any_element(),
             Stage::Revealing { reel, frame, .. } => self
                 .render_reveal(&reel[(*frame).min(reel.len() - 1)])
                 .into_any_element(),
-            Stage::Winner { watch, .. } => self.render_winner(watch, cx).into_any_element(),
+            Stage::Winner { watch, .. } => {
+                self.render_winner(watch, can_win, cx).into_any_element()
+            }
         };
         v_flex()
             .flex_1()
@@ -66,11 +87,11 @@ impl AppView {
             .h_full()
             .p_6()
             .gap_5()
-            .child(self.render_stats())
+            .child(self.render_stats(can_win))
             .child(body)
     }
 
-    fn render_stats(&self) -> impl IntoElement {
+    fn render_stats(&self, can_win: usize) -> impl IntoElement {
         let p = self.palette;
         let open = self.giveaway.state() == GiveawayState::Open;
         let number_card = |value: usize, label: String| {
@@ -142,10 +163,7 @@ impl AppView {
                 self.giveaway.entrants().len(),
                 t!("stage.entered").into_owned(),
             ))
-            .child(number_card(
-                self.can_win(),
-                t!("stage.can_win").into_owned(),
-            ))
+            .child(number_card(can_win, t!("stage.can_win").into_owned()))
     }
 
     fn render_entrants(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -185,11 +203,8 @@ impl AppView {
                 count,
                 cx.processor(|this, range: std::ops::Range<usize>, _, _| {
                     let p = this.palette;
-                    this.giveaway
-                        .entrants()
-                        .enumerate()
-                        .skip(range.start)
-                        .take(range.len())
+                    range
+                        .filter_map(|i| this.giveaway.entrant_at(i).map(|entrant| (i, entrant)))
                         .map(|(i, entrant)| {
                             let (role, weight) = entrant.effective(&this.config.weights);
                             h_flex()
@@ -265,7 +280,12 @@ impl AppView {
             )
     }
 
-    fn render_winner(&self, watch: &WinnerWatch, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_winner(
+        &self,
+        watch: &WinnerWatch,
+        can_win: usize,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let p = self.palette;
         let winner = watch.winner();
         let (role, _) = winner.effective(&self.config.weights);
@@ -298,7 +318,6 @@ impl AppView {
                 )
                 .child(div().flex_1().min_w_0().child(reply.text.clone()))
         });
-        let can_win = self.can_win();
 
         v_flex()
             .flex_1()
@@ -364,6 +383,14 @@ impl AppView {
                     .children(replies)
                     .into_any_element()
             })
+            .when(can_win == 0, |panel| {
+                panel.child(
+                    div()
+                        .text_sm()
+                        .text_color(p.muted)
+                        .child(t!("winner.nobody_left").into_owned()),
+                )
+            })
             .child(
                 h_flex()
                     .gap_3()
@@ -392,7 +419,13 @@ mod tests {
     use rand::rngs::StdRng;
 
     // Not `super::*`: that brings in gpui's own `test` attribute through `gpui_kit::*`.
-    use super::{Duration, REVEAL_FRAMES, format_clock, reveal_reel};
+    use std::time::Instant;
+
+    use super::{Duration, REVEAL_FRAMES, Stage, format_clock, reveal_reel};
+    use crate::domain::chat::ChatMessage;
+    use crate::domain::giveaway::Entrant;
+    use crate::domain::role::Role;
+    use crate::domain::winner::{WaitState, WinnerWatch};
 
     #[test]
     fn reel_ends_on_the_winner_and_uses_only_pool_names() {
@@ -415,5 +448,41 @@ mod tests {
         assert_eq!(format_clock(Duration::from_secs(42)), "0:42");
         assert_eq!(format_clock(Duration::from_millis(125_900)), "2:05");
         assert_eq!(format_clock(Duration::from_secs(3600)), "60:00");
+    }
+
+    #[test]
+    fn reveal_lasts_about_two_seconds() {
+        assert_eq!(REVEAL_FRAMES, 20);
+    }
+
+    #[test]
+    fn a_reply_during_the_reveal_counts() {
+        let drawn_at = Instant::now();
+        let winner = Entrant {
+            user_id: "7".into(),
+            display_name: "Lucky".into(),
+            roles: vec![Role::Pleb],
+        };
+        let mut stage = Stage::Revealing {
+            reel: vec!["Lucky".into()],
+            frame: 0,
+            watch: WinnerWatch::new(winner, drawn_at),
+        };
+        let reply = ChatMessage {
+            user_id: "7".into(),
+            display_name: "Lucky".into(),
+            badges: vec![],
+            text: "me!".into(),
+        };
+        assert!(stage.on_message(&reply, drawn_at + Duration::from_secs(1)));
+        let Stage::Revealing { watch, .. } = stage else {
+            panic!("still revealing");
+        };
+        assert_eq!(
+            watch.state(),
+            WaitState::Answered {
+                after: Duration::from_secs(1)
+            }
+        );
     }
 }

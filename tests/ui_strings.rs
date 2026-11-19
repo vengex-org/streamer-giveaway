@@ -1,5 +1,5 @@
-//! Every user-facing text comes from `locales/app.toml` (spec ux-refresh AC-3). This fails when a
-//! string literal is passed straight to a text-taking UI call in `src/ui/`.
+//! Every user-facing text comes from `locales/app.toml`. This fails when a string literal is passed
+//! straight to a text-taking UI call in `src/ui/`.
 
 use std::fs;
 use std::path::Path;

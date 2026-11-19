@@ -3,6 +3,7 @@
 
 use rust_i18n::t;
 
+use crate::domain::eligibility::TimeUnit;
 use crate::domain::matcher::MatchMode;
 use crate::domain::prefs::Language;
 use crate::domain::role::Role;
@@ -48,6 +49,14 @@ pub fn mode_label(mode: MatchMode) -> String {
         MatchMode::Word => t!("mode.word"),
         MatchMode::Exact => t!("mode.exact"),
         MatchMode::Contains => t!("mode.contains"),
+    }
+    .into_owned()
+}
+
+pub fn unit_label(unit: TimeUnit) -> String {
+    match unit {
+        TimeUnit::Minutes => t!("who.minutes"),
+        TimeUnit::Hours => t!("who.hours"),
     }
     .into_owned()
 }

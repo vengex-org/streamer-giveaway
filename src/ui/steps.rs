@@ -30,13 +30,13 @@ pub(super) struct StepInputs {
     pub connected: bool,
     pub keyword_text_valid: bool,
     pub can_win: usize,
-    pub winner_shown: bool,
+    pub draw_in_progress: bool,
 }
 
 /// The step the streamer should do next; none while a draw is on screen (the winner panel has
 /// its own actions).
 pub(super) fn next_step(inputs: StepInputs) -> Option<Step> {
-    if inputs.winner_shown {
+    if inputs.draw_in_progress {
         None
     } else if !inputs.connected {
         Some(Step::Connect)
@@ -50,17 +50,16 @@ pub(super) fn next_step(inputs: StepInputs) -> Option<Step> {
 }
 
 impl AppView {
-    pub(super) fn render_steps(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn render_steps(&self, can_win: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let connected = matches!(self.status, ConnectionStatus::Connected(_));
         let keyword_text_valid = self.keyword_text_valid(cx);
-        let can_win = self.can_win();
         let open = self.giveaway.state() == GiveawayState::Open;
         let next = next_step(StepInputs {
             connected,
             keyword_text_valid,
             can_win,
-            winner_shown: !matches!(self.stage, Stage::List),
+            draw_in_progress: !matches!(self.stage, Stage::List),
         });
 
         let notices = self.notices.values().map(|notice| {
@@ -324,7 +323,7 @@ impl AppView {
                 t!(
                     "who.active_summary",
                     amount = e.active_window.amount,
-                    unit = unit_label(e.active_window.unit)
+                    unit = i18n::unit_label(e.active_window.unit)
                 )
                 .into_owned(),
             );
@@ -345,7 +344,7 @@ impl AppView {
                 .xsmall()
                 .when(selected, |b| b.primary())
                 .when(!selected, |b| b.outline())
-                .label(unit_label(unit))
+                .label(i18n::unit_label(unit))
                 .toggled(selected)
                 .on_click(cx.listener(move |this, _, _, cx| this.set_window_unit(unit, cx)))
         });
@@ -429,7 +428,9 @@ impl AppView {
         let p = self.palette;
         let entrants = self.giveaway.entrants().len();
         let drawing = !matches!(self.stage, Stage::List);
-        let reason = if can_win > 0 {
+        let reason = if drawing {
+            Some(t!("step.draw.busy"))
+        } else if can_win > 0 {
             None
         } else if entrants > 0 {
             Some(t!("step.draw.all_zero"))
@@ -473,14 +474,6 @@ impl AppView {
     }
 }
 
-fn unit_label(unit: TimeUnit) -> String {
-    match unit {
-        TimeUnit::Minutes => t!("who.minutes"),
-        TimeUnit::Hours => t!("who.hours"),
-    }
-    .into_owned()
-}
-
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that brings in gpui's own `test` attribute through `gpui_kit::*`.
@@ -491,7 +484,7 @@ mod tests {
             connected: true,
             keyword_text_valid: true,
             can_win: 0,
-            winner_shown: false,
+            draw_in_progress: false,
         }
     }
 
@@ -529,9 +522,9 @@ mod tests {
     }
 
     #[test]
-    fn no_step_while_a_winner_is_shown() {
+    fn no_step_while_a_draw_is_on_screen() {
         let state = StepInputs {
-            winner_shown: true,
+            draw_in_progress: true,
             connected: false,
             ..inputs()
         };

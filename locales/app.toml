@@ -47,17 +47,29 @@ en = "Lost #%{channel}, reconnecting: %{cause}"
 cs = "Spojení s #%{channel} spadlo, připojuji znovu: %{cause}"
 es = "Se perdió #%{channel}, reconectando: %{cause}"
 
-[header.theme.to_dark]
-sk = "Tmavý režim"
-en = "Dark mode"
-cs = "Tmavý režim"
-es = "Modo oscuro"
+[header.theme.system]
+sk = "Systém"
+en = "System"
+cs = "Systém"
+es = "Sistema"
 
-[header.theme.to_light]
-sk = "Svetlý režim"
-en = "Light mode"
-cs = "Světlý režim"
-es = "Modo claro"
+[header.theme.light]
+sk = "Svetlý"
+en = "Light"
+cs = "Světlý"
+es = "Claro"
+
+[header.theme.dark]
+sk = "Tmavý"
+en = "Dark"
+cs = "Tmavý"
+es = "Oscuro"
+
+[header.lang_auto]
+sk = "Auto"
+en = "Auto"
+cs = "Auto"
+es = "Auto"
 
 # Steps column
 
@@ -494,3 +506,15 @@ sk = "Čas aktivity: zadaj celé číslo od 1."
 en = "Activity time: enter a whole number from 1."
 cs = "Čas aktivity: zadej celé číslo od 1."
 es = "Tiempo de actividad: escribe un número entero desde 1."
+
+[step.draw.busy]
+sk = "Najprv dokonči aktuálne žrebovanie (Hotovo)."
+en = "Finish the current draw first (Done)."
+cs = "Nejdřív dokonči aktuální losování (Hotovo)."
+es = "Primero termina el sorteo actual (Listo)."
+
+[winner.nobody_left]
+sk = "Ďalší už nemá kto vyhrať."
+en = "Nobody else can win."
+cs = "Už nemá kdo další vyhrát."
+es = "Nadie más puede ganar."

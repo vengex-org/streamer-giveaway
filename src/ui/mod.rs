@@ -4,7 +4,7 @@ mod stage;
 mod steps;
 
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -22,11 +22,7 @@ use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
 use crate::storage::ConfigStore;
 use palette::Palette;
-use stage::Stage;
-
-/// How often the stage ticker runs while a draw is shown: one reveal frame, and often enough for
-/// a stopwatch that changes once per second.
-const TICK: Duration = Duration::from_millis(100);
+use stage::{Stage, TICK};
 
 /// What a notice is about. Each source replaces or clears only its own notice, so fixing one
 /// problem never hides another that still exists.
@@ -83,6 +79,8 @@ pub struct AppView {
     bonus_open: bool,
     who_open: bool,
     os_dark: bool,
+    /// The OS language, read once at startup.
+    os_language: Language,
     palette: Palette,
     channel_input: Entity<InputState>,
     keyword_input: Entity<InputState>,
@@ -102,7 +100,8 @@ impl AppView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        i18n::apply(config.language.unwrap_or_else(i18n::os_language));
+        let os_language = i18n::os_language();
+        i18n::apply(config.language.unwrap_or(os_language));
         let os_dark = is_dark(window.appearance());
         let theme = effective_theme(config.theme, os_dark);
         let palette = Palette::for_theme(theme);
@@ -191,6 +190,7 @@ impl AppView {
             bonus_open: false,
             who_open: false,
             os_dark,
+            os_language,
             palette,
             channel_input,
             keyword_input,
@@ -200,10 +200,6 @@ impl AppView {
             ticker: None,
             _subscriptions: subscriptions,
         }
-    }
-
-    fn language(&self) -> Language {
-        self.config.language.unwrap_or_else(i18n::os_language)
     }
 
     fn theme(&self) -> ThemeChoice {
@@ -226,10 +222,7 @@ impl AppView {
                 let now = Instant::now();
                 let entered = self.giveaway.on_message(&msg, &self.config.weights, now)
                     != MessageOutcome::Ignored;
-                let replied = match &mut self.stage {
-                    Stage::Winner { watch, .. } => watch.on_message(&msg, now),
-                    _ => false,
-                };
+                let replied = self.stage.on_message(&msg, now);
                 entered || replied
             }
             ChatEvent::Status(status) => {
@@ -416,10 +409,11 @@ impl AppView {
         match self.giveaway.draw(&weights, &mut rand::rng()) {
             DrawOutcome::Winner(winner) => {
                 let reel = stage::reveal_reel(&pool, &winner.display_name, &mut rand::rng());
+                self.send(ChatCommand::WinnerDrawn(winner.user_id.clone()));
                 self.stage = Stage::Revealing {
                     reel,
                     frame: 0,
-                    winner,
+                    watch: WinnerWatch::new(winner, Instant::now()),
                 };
                 self.start_ticker(cx);
             }
@@ -448,19 +442,16 @@ impl AppView {
         let now = Instant::now();
         match &mut self.stage {
             Stage::List => false,
-            Stage::Revealing {
-                reel,
-                frame,
-                winner,
-            } => {
+            Stage::Revealing { reel, frame, .. } => {
                 *frame += 1;
-                if *frame >= reel.len() {
-                    let user_id = winner.user_id.clone();
+                if *frame >= reel.len()
+                    && let Stage::Revealing { watch, .. } =
+                        std::mem::replace(&mut self.stage, Stage::List)
+                {
                     self.stage = Stage::Winner {
-                        watch: WinnerWatch::new(winner.clone(), now),
-                        shown_second: 0,
+                        shown_second: watch.elapsed(now).as_secs(),
+                        watch,
                     };
-                    self.send(ChatCommand::WinnerDrawn(user_id));
                 }
                 cx.notify();
                 true
@@ -490,9 +481,15 @@ impl AppView {
         self.finish_winner(cx);
     }
 
-    fn set_language(&mut self, language: Language, window: &mut Window, cx: &mut Context<Self>) {
-        i18n::apply(language);
-        self.config.language = Some(language);
+    /// `None` follows the OS language.
+    fn set_language(
+        &mut self,
+        language: Option<Language>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        i18n::apply(language.unwrap_or(self.os_language));
+        self.config.language = language;
         self.save();
         self.channel_input.update(cx, |input, cx| {
             input.set_placeholder(t!("step.connect.placeholder"), window, cx)
@@ -503,12 +500,14 @@ impl AppView {
         cx.notify();
     }
 
-    fn toggle_theme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let next = match self.theme() {
-            ThemeChoice::Dark => ThemeChoice::Light,
-            ThemeChoice::Light => ThemeChoice::Dark,
-        };
-        self.config.theme = Some(next);
+    /// `None` follows the OS appearance.
+    fn set_theme(
+        &mut self,
+        theme: Option<ThemeChoice>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.config.theme = theme;
         self.save();
         self.apply_theme(window, cx);
     }
@@ -531,6 +530,7 @@ fn is_dark(appearance: WindowAppearance) -> bool {
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
+        let can_win = self.can_win();
         div()
             .flex()
             .flex_col()
@@ -543,8 +543,8 @@ impl Render for AppView {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .child(self.render_steps(cx))
-                    .child(self.render_stage(cx)),
+                    .child(self.render_steps(can_win, cx))
+                    .child(self.render_stage(can_win, cx)),
             )
     }
 }
