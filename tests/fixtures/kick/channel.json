@@ -1,0 +1,69 @@
+{
+  "id": 1,
+  "slug": "some_streamer",
+  "chatroom": {
+    "id": 18490228
+  },
+  "subscriber_badges": [
+    {
+      "id": 965562,
+      "channel_id": 18750821,
+      "months": 1,
+      "badge_image": {
+        "src": "https://files.kick.com/channel_subscriber_badges/965562/conversion/original-fullsize.png"
+      }
+    },
+    {
+      "id": 965564,
+      "channel_id": 18750821,
+      "months": 2,
+      "badge_image": {
+        "src": "https://files.kick.com/channel_subscriber_badges/965564/conversion/original-fullsize.png"
+      }
+    },
+    {
+      "id": 965566,
+      "channel_id": 18750821,
+      "months": 3,
+      "badge_image": {
+        "src": "https://files.kick.com/channel_subscriber_badges/965566/conversion/original-fullsize.png"
+      }
+    },
+    {
+      "id": 965568,
+      "channel_id": 18750821,
+      "months": 6,
+      "badge_image": {
+        "src": "https://files.kick.com/channel_subscriber_badges/965568/conversion/original-fullsize.png"
+      }
+    },
+    {
+      "id": 965569,
+      "channel_id": 18750821,
+      "months": 9,
+      "badge_image": {
+        "src": "https://files.kick.com/channel_subscriber_badges/965569/conversion/original-fullsize.png"
+      }
+    },
+    {
+      "id": 965570,
+      "channel_id": 18750821,
+      "months": 12,
+      "badge_image": {
+        "src": "https://files.kick.com/channel_subscriber_badges/965570/conversion/original-fullsize.png"
+      }
+    },
+    {
+      "id": 965572,
+      "channel_id": 18750821,
+      "months": 18,
+      "badge_image": {
+        "src": "https://files.kick.com/channel_subscriber_badges/965572/conversion/original-fullsize.png"
+      }
+    }
+  ],
+  "livestream": {
+    "id": 138742125,
+    "is_live": true
+  }
+}

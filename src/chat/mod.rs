@@ -108,6 +108,9 @@ impl ChatBridge {
     /// Starts the chat thread. `problems` receives connection problems reported by `twitch-irc`
     /// (see [`connection_problem_layer`]).
     pub fn spawn(problems: async_channel::Receiver<String>) -> std::io::Result<Self> {
+        // The GPUI and reqwest crates enable both of rustls' crypto backends, and then rustls
+        // cannot pick one on its own. Kick's socket needs it chosen; an earlier install wins.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let (command_tx, command_rx) = async_channel::unbounded();
         let (event_tx, event_rx) = async_channel::unbounded();
         let runtime = tokio::runtime::Builder::new_current_thread()
