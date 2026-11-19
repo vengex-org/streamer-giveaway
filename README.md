@@ -58,19 +58,10 @@ Windows builds are on the [releases page](https://github.com/vengex-org/streamer
 The .exe is not signed, so Windows SmartScreen may warn before the first start ("More info", then
 "Run anyway").
 
-## Code signing policy
+## Privacy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org).
-
-- Release builds are made by [GitHub Actions](.github/workflows/build.yml) from the source in this
-  repository.
-- Committers and reviewers: members of [vengex-org](https://github.com/vengex-org).
-- Approvers: maintainers of [vengex-org](https://github.com/vengex-org). Each signed release is
-  approved by hand.
-
-Privacy: the app sends nothing anywhere unless you ask it to. When you connect to a channel it
-reads that channel's Twitch chat anonymously. Settings and giveaway logs stay on your computer.
+The app sends nothing anywhere unless you ask it to. When you connect to a channel it reads that
+channel's Twitch chat anonymously. Settings and giveaway logs stay on your computer.
 
 ## Build and run
 
