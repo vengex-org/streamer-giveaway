@@ -515,13 +515,15 @@ impl AppView {
     fn choose_chats(&mut self, mode: ChatMode, platform: Platform, cx: &mut Context<Self>) {
         self.config.chat_mode = mode;
         self.config.platform = platform;
-        let kept = self.config.chat_platforms();
-        for platform in Platform::ALL {
-            let running = !matches!(self.status(platform), ConnectionStatus::Idle);
-            if !kept.contains(&platform) && (running || self.joining.contains(&platform)) {
-                self.joining.remove(&platform);
-                self.send(ChatCommand::Leave(platform));
-            }
+        let open: Vec<Platform> = Platform::ALL
+            .into_iter()
+            .filter(|p| {
+                !matches!(self.status(*p), ConnectionStatus::Idle) || self.joining.contains(p)
+            })
+            .collect();
+        for platform in self.config.chats_to_leave(&open) {
+            self.joining.remove(&platform);
+            self.send(ChatCommand::Leave(platform));
         }
         self.set_notice(NoticeSource::Channel, None);
         self.save();

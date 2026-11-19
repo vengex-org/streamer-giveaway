@@ -74,6 +74,16 @@ impl Config {
         }
     }
 
+    /// The chats to leave for this choice: every `open` one (connected or still joining) that the
+    /// chosen mode does not read.
+    pub fn chats_to_leave(&self, open: &[Platform]) -> Vec<Platform> {
+        let kept = self.chat_platforms();
+        open.iter()
+            .copied()
+            .filter(|platform| !kept.contains(platform))
+            .collect()
+    }
+
     pub fn from_toml(text: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(text)
     }
@@ -217,6 +227,23 @@ theme = \"neon\"
         assert_eq!(config.kick_channel, None);
         assert_eq!(config.youtube_source, None);
         assert_eq!(config.keyword.as_str(), "GO");
+    }
+
+    #[test]
+    fn one_platform_leaves_the_other_open_chats_and_multistream_leaves_none() {
+        let open = [Platform::Twitch, Platform::YouTube];
+        let kick = Config {
+            platform: Platform::Kick,
+            ..Config::default()
+        };
+        assert_eq!(kick.chats_to_leave(&open), open);
+        let twitch = Config::default();
+        assert_eq!(twitch.chats_to_leave(&open), [Platform::YouTube]);
+        let multi = Config {
+            chat_mode: ChatMode::Multi,
+            ..kick
+        };
+        assert!(multi.chats_to_leave(&open).is_empty());
     }
 
     #[test]

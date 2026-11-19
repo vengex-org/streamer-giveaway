@@ -21,9 +21,8 @@ pub use twitch::to_chat_message;
 /// look scripted.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36     (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-/// Waits between reconnect attempts on Kick and YouTube, then the last one again. A guess, like
-/// Twitch's poll interval: quick after a short drop, slow enough not to hammer a platform during
-/// an outage.
+/// Waits between reconnect attempts on Kick and YouTube, then the last one again. A guess: quick
+/// after a short drop, slow enough not to hammer a platform during an outage.
 const BACKOFF: [std::time::Duration; 5] = [
     std::time::Duration::from_secs(1),
     std::time::Duration::from_secs(2),

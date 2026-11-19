@@ -140,6 +140,21 @@ fn badges(rng: &mut StdRng) -> Vec<Badge> {
 
 /// The scripted feed: [`TOTAL_MESSAGES`] messages with their time offset from the start, in
 /// order. The same seed gives the same feed.
+/// A chatter from a joined chat to say something while the feed is idle; `None` when no chat is
+/// joined.
+fn idle_author<'a>(
+    script: &'a [(Duration, ChatMessage)],
+    joined: &HashSet<Platform>,
+    rng: &mut StdRng,
+) -> Option<&'a ChatMessage> {
+    let authors: Vec<&ChatMessage> = script
+        .iter()
+        .map(|(_, m)| m)
+        .filter(|m| joined.contains(&m.platform()))
+        .collect();
+    authors.choose(rng).copied()
+}
+
 pub fn feed(seed: u64) -> Vec<(Duration, ChatMessage)> {
     let mut rng = StdRng::seed_from_u64(seed);
     let people = chatters(&mut rng, CHATTERS);
@@ -416,18 +431,12 @@ fn run(
                 next += 1;
             }
             if next == script.len() && now >= idle_at {
-                let joined_authors: Vec<&ChatMessage> = script
-                    .iter()
-                    .map(|(_, m)| m)
-                    .filter(|m| joined.contains(&m.platform()))
-                    .collect();
-                let author = joined_authors
-                    .choose(&mut rng)
-                    .expect("a joined chat has chatters");
-                let line = CHATTER.choose(&mut rng).expect("lines exist");
-                let chatter = author.with_text(*line);
-                if !send(ChatEvent::Message(chatter)) {
-                    return;
+                // A small crowd can leave a joined chat without chatters; it then stays quiet.
+                if let Some(author) = idle_author(&script, &joined, &mut rng) {
+                    let line = CHATTER.choose(&mut rng).expect("lines exist");
+                    if !send(ChatEvent::Message(author.with_text(*line))) {
+                        return;
+                    }
                 }
                 idle_at = now + IDLE_MESSAGE_EVERY;
             }
@@ -562,5 +571,26 @@ mod tests {
         assert!(has(Platform::YouTube, Role::SubT1));
         assert!(has(Platform::YouTube, Role::Mod));
         assert!(!has(Platform::Kick, Role::SubT3));
+    }
+
+    #[test]
+    fn idle_chatters_come_only_from_joined_chats() {
+        let feed = feed(42);
+        let mut rng = StdRng::seed_from_u64(1);
+        let joined = HashSet::from([Platform::Kick]);
+        for _ in 0..200 {
+            let author = idle_author(&feed, &joined, &mut rng).unwrap();
+            assert_eq!(author.platform(), Platform::Kick);
+        }
+        assert!(idle_author(&feed, &HashSet::new(), &mut rng).is_none());
+    }
+
+    #[test]
+    fn a_small_crowd_leaves_twitch_without_idle_chatters() {
+        // Five viewers all land on Kick or YouTube, so a joined Twitch chat has nobody to talk.
+        let feed = crowd_feed(Crowd::with_viewers(5), 3);
+        let mut rng = StdRng::seed_from_u64(1);
+        let joined = HashSet::from([Platform::Twitch]);
+        assert!(idle_author(&feed, &joined, &mut rng).is_none());
     }
 }
