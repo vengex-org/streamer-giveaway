@@ -455,10 +455,12 @@ impl AppView {
             } => {
                 *frame += 1;
                 if *frame >= reel.len() {
+                    let user_id = winner.user_id.clone();
                     self.stage = Stage::Winner {
                         watch: WinnerWatch::new(winner.clone(), now),
                         shown_second: 0,
                     };
+                    self.send(ChatCommand::WinnerDrawn(user_id));
                 }
                 cx.notify();
                 true

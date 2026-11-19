@@ -1,5 +1,7 @@
 use gpui_kit::*;
 use streamer_giveaway::chat::{ChatBridge, connection_problem_layer};
+use streamer_giveaway::demo;
+use streamer_giveaway::domain::chat::{ChannelLogin, Keyword};
 use streamer_giveaway::storage::{ConfigStore, Loaded};
 use streamer_giveaway::ui::AppView;
 use tracing_subscriber::prelude::*;
@@ -19,13 +21,20 @@ fn main() {
         )
         .init();
 
-    let store = ConfigStore::in_user_config_dir();
+    // `--demo` swaps Twitch for a simulated chat and keeps its own settings file.
+    let demo_mode = std::env::args().any(|arg| arg == "--demo");
+    let store = if demo_mode {
+        ConfigStore::demo_in_user_config_dir()
+    } else {
+        ConfigStore::in_user_config_dir()
+    };
     let legacy_warning = store
         .as_ref()
+        .filter(|_| !demo_mode)
         .zip(ConfigStore::legacy_user_config_dir())
         .and_then(|(store, legacy)| store.adopt_legacy(&legacy));
     let Loaded {
-        config,
+        mut config,
         warning,
         may_save,
     } = match &store {
@@ -41,7 +50,16 @@ fn main() {
         .into_iter()
         .flatten()
         .reduce(|first, second| format!("{first}\n{second}"));
-    let bridge = ChatBridge::spawn(problems).expect("failed to start the chat thread");
+    let bridge = if demo_mode {
+        if config.channel.is_none() {
+            config.channel = ChannelLogin::parse(demo::DEMO_CHANNEL).ok();
+            config.keyword = Keyword::parse(demo::DEMO_KEYWORD).expect("demo keyword is not empty");
+        }
+        demo::spawn()
+    } else {
+        ChatBridge::spawn(problems)
+    }
+    .expect("failed to start the chat thread");
 
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);

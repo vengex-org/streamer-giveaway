@@ -47,6 +47,8 @@ pub enum ChatEvent {
 pub enum ChatCommand {
     Join(ChannelLogin),
     Leave,
+    /// The user with this id was just drawn. The demo chat makes them answer; Twitch ignores it.
+    WinnerDrawn(String),
 }
 
 pub fn to_chat_message(msg: &PrivmsgMessage) -> ChatMessage {
@@ -193,13 +195,14 @@ async fn run(
         tokio::select! {
             command = commands.recv() => {
                 let Ok(command) = command else { break };
-                if let Some(old) = &tracker.channel {
-                    client.part(old.as_str().to_owned());
-                }
                 let channel = match command {
                     ChatCommand::Join(channel) => Some(channel),
                     ChatCommand::Leave => None,
+                    ChatCommand::WinnerDrawn(_) => continue,
                 };
+                if let Some(old) = &tracker.channel {
+                    client.part(old.as_str().to_owned());
+                }
                 if let Some(channel) = &channel
                     && let Err(err) = client.join(channel.as_str().to_owned())
                 {

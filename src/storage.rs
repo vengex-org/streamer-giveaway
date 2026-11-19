@@ -43,6 +43,12 @@ impl ConfigStore {
         Self::in_named_config_dir("streamer-giveaway")
     }
 
+    /// Settings of the `--demo` mode, kept apart so trying the demo never changes real settings.
+    pub fn demo_in_user_config_dir() -> Option<Self> {
+        ProjectDirs::from("", "", "streamer-giveaway")
+            .map(|dirs| Self::at(dirs.config_dir().join("demo.toml")))
+    }
+
     /// Where the app kept its settings while it was called yep-giveaway.
     pub fn legacy_user_config_dir() -> Option<Self> {
         Self::in_named_config_dir("yep-giveaway")
