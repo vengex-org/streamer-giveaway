@@ -40,3 +40,54 @@ jobs:
           name: streamer-giveaway-windows-x64
           path: target/release/streamer-giveaway.exe
           if-no-files-found: error
+
+  # A pushed tag v* publishes the exe built above from that exact commit, with a signed record of
+  # where it came from, so anyone can check a download against this repository.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Checkout turns an annotated tag into a lightweight one; the release notes are its message.
+      - name: Fetch the annotated tag
+        run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+
+      - name: Check the tag matches Cargo.toml
+        id: version
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f2)
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: streamer-giveaway-windows-x64
+
+      - name: Name the exe and its checksum
+        id: files
+        run: |
+          exe="streamer-giveaway-${{ steps.version.outputs.version }}-windows-x64.exe"
+          mv streamer-giveaway.exe "$exe"
+          sha256sum "$exe" > SHA256SUMS.txt
+          echo "exe=${exe}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.files.outputs.exe }}
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${GITHUB_REF_NAME}" --verify-tag --notes-from-tag
+          --title "${GITHUB_REF_NAME}" "${{ steps.files.outputs.exe }}" SHA256SUMS.txt

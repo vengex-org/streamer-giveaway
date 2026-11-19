@@ -88,6 +88,18 @@ The .exe is not signed, so Windows SmartScreen may warn before the first start (
 "Run anyway"). When a newer release is out, "New version" shows in the app's top bar and opens
 its download page.
 
+### Verify the download
+
+From v0.4.4 on, GitHub Actions builds each release from its tagged commit and signs a record of
+where the .exe came from. With the [GitHub CLI](https://cli.github.com) installed:
+
+```sh
+gh attestation verify streamer-giveaway-0.4.4-windows-x64.exe --repo vengex-org/streamer-giveaway
+```
+
+It prints the repository, the workflow and the commit the file was built from. `SHA256SUMS.txt` on
+the release page lists the file's checksum, for a quick check that the download is complete.
+
 ## Privacy
 
 At start the app asks GitHub once for the newest release. The request carries only the app's
@@ -152,6 +164,9 @@ cargo fmt --check
   messages per second, peak and unique chatters. `<channel>` is a Twitch login, `kick:<name>` or
   `youtube:<link or @handle>`. `cargo run --release --example raffle_sim` prints
   how long giveaways take for several audience sizes and delivery caps.
+- A release: raise `version` in `Cargo.toml`, commit, then push an annotated tag whose message
+  is the release notes (`git tag -a v0.4.4 -F notes.md`, `git push origin v0.4.4`). The build
+  workflow checks that the tag matches `Cargo.toml`, builds the .exe and publishes the release.
 - Texts live in `locales/app.toml`. A test fails when a language is missing or when UI code passes
   text that is not translated.
 
