@@ -171,6 +171,40 @@ pub fn write_session_log(dir: &Path, stamp: &str, csv: &str) -> io::Result<PathB
     Ok(path)
 }
 
+/// Adds one row to a log written earlier (a winner drawn after entries closed).
+pub fn append_session_row(path: &Path, row: &str) -> io::Result<()> {
+    use std::io::Write as _;
+    fs::OpenOptions::new()
+        .append(true)
+        .open(path)?
+        .write_all(row.as_bytes())
+}
+
+/// Giveaway logs in `dir` as `(stamp, path)`, newest first. A missing folder means no logs yet.
+pub fn session_logs(dir: &Path) -> io::Result<Vec<(String, PathBuf)>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(err),
+    };
+    let mut logs = Vec::new();
+    for entry in entries {
+        let path = entry?.path();
+        let stamp = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_prefix("giveaway-"))
+            .and_then(|name| name.strip_suffix(".csv"))
+            .map(str::to_owned);
+        if let Some(stamp) = stamp {
+            logs.push((stamp, path));
+        }
+    }
+    // Stamps are UTC `YYYYMMDD-HHMMSSZ`, so text order is time order.
+    logs.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(logs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,6 +267,35 @@ mod tests {
         let path = write_session_log(&dir.path().join("logs"), "20261120-180311Z", "a\n").unwrap();
         assert!(path.ends_with("giveaway-20261120-180311Z.csv"));
         assert_eq!(fs::read_to_string(path).unwrap(), "a\n");
+    }
+
+    #[test]
+    fn appended_rows_follow_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session_log(dir.path(), "20261120-180311Z", "a\n").unwrap();
+        append_session_row(&path, "b\n").unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "a\nb\n");
+    }
+
+    #[test]
+    fn session_logs_are_listed_newest_first_and_other_files_are_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        for stamp in ["20261119-090000Z", "20261120-180311Z"] {
+            write_session_log(dir.path(), stamp, "x").unwrap();
+        }
+        fs::write(dir.path().join("notes.txt"), "x").unwrap();
+        let stamps: Vec<String> = session_logs(dir.path())
+            .unwrap()
+            .into_iter()
+            .map(|(stamp, _)| stamp)
+            .collect();
+        assert_eq!(stamps, ["20261120-180311Z", "20261119-090000Z"]);
+    }
+
+    #[test]
+    fn a_missing_logs_folder_lists_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(session_logs(&dir.path().join("logs")).unwrap().is_empty());
     }
 
     #[test]
