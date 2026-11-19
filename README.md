@@ -22,7 +22,8 @@ browser source.
 - While entries are open, a line under the counters shows chat messages per second, new entrants
   in the last minute and how long ago the last one came in, so you can see when entries dry up.
   When entries close, the app saves a CSV log with the time and kind of every message (no message
-  text) for measuring the giveaway afterwards.
+  text) and the drawn winners. The History page lists past giveaways from these logs: how long
+  entries were open, entrants, messages, how fast 90 % of the entries came in, and the winners.
 - Five numbered steps with a short hint guide first-time users. The next step is highlighted, and
   a button you cannot press yet says why. The Rules step always shows who can enter and how many
   tickets each group gets, so you don't have to look for them.
