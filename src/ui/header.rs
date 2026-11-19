@@ -6,7 +6,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use super::{AppView, Page};
+use super::{AppView, Page, RunMode};
 use crate::chat::ConnectionStatus;
 use crate::domain::prefs::{Language, ThemeChoice};
 use crate::i18n;
@@ -97,6 +97,27 @@ impl AppView {
             .on_click(
                 cx.listener(move |this, _, window, cx| this.set_theme(next_theme, window, cx)),
             );
+        // Live: a button that opens a demo window. Demo: a label, so the two windows are told apart.
+        let demo = match self.mode {
+            RunMode::Live => Button::new("demo")
+                .small()
+                .ghost()
+                .icon(IconName::FlaskConical)
+                .label(t!("header.demo.button").into_owned())
+                .tooltip(t!("header.demo.tooltip").into_owned())
+                .on_click(cx.listener(|this, _, _, cx| this.open_demo(cx)))
+                .into_any_element(),
+            RunMode::Demo => div()
+                .px_2()
+                .py_0p5()
+                .rounded_md()
+                .bg(p.accent_soft)
+                .text_sm()
+                .font_semibold()
+                .text_color(p.accent_text)
+                .child(t!("header.demo.badge").into_owned())
+                .into_any_element(),
+        };
         let pages = [
             (Page::Giveaway, t!("nav.giveaway")),
             (Page::History, t!("nav.history")),
@@ -149,6 +170,7 @@ impl AppView {
                     ),
             )
             .child(div().flex_1())
+            .child(demo)
             // The select fills its parent, so a fixed box keeps it from taking the header's room.
             .child(
                 div().flex_none().w(px(190.)).child(

@@ -49,6 +49,7 @@ struct SavedLog {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum NoticeSource {
     Startup,
+    Demo,
     Save,
     Chat,
     Channel,
@@ -62,6 +63,7 @@ enum NoticeSource {
 #[derive(Debug, Clone)]
 enum Notice {
     Startup(String),
+    DemoFailed(String),
     Save(String),
     ChatStopped,
     ChatRejected(String),
@@ -76,6 +78,7 @@ impl Notice {
     fn text(&self) -> String {
         match self {
             Notice::Startup(cause) => t!("error.startup", cause = cause),
+            Notice::DemoFailed(cause) => t!("error.demo", cause = cause),
             Notice::Save(cause) => t!("error.save", cause = cause),
             Notice::ChatStopped => t!("error.chat_stopped"),
             Notice::ChatRejected(cause) => t!("error.chat_rejected", cause = cause),
@@ -91,7 +94,15 @@ impl Notice {
     }
 }
 
+/// Whether this window reads a real Twitch chat or the simulated one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunMode {
+    Live,
+    Demo,
+}
+
 pub struct AppView {
+    mode: RunMode,
     config: Config,
     store: Option<ConfigStore>,
     giveaway: Giveaway,
@@ -138,6 +149,7 @@ pub struct AppView {
 
 impl AppView {
     pub fn new(
+        mode: RunMode,
         bridge: ChatBridge,
         store: Option<ConfigStore>,
         config: Config,
@@ -245,6 +257,7 @@ impl AppView {
 
         Self {
             giveaway,
+            mode,
             config,
             store,
             commands: bridge.commands,
@@ -653,6 +666,24 @@ impl AppView {
                 }
             },
         ));
+    }
+
+    /// Starts this app again in demo mode, as a second window with its own settings, so the
+    /// streamer can try a giveaway without touching their real channel or settings.
+    fn open_demo(&mut self, cx: &mut Context<Self>) {
+        let started = std::env::current_exe()
+            .and_then(|exe| std::process::Command::new(exe).arg("--demo").spawn());
+        match started {
+            Ok(_) => {
+                self.notices.remove(&NoticeSource::Demo);
+            }
+            Err(err) => {
+                tracing::warn!("demo window not started: {err}");
+                self.notices
+                    .insert(NoticeSource::Demo, Notice::DemoFailed(err.to_string()));
+            }
+        }
+        cx.notify();
     }
 
     /// Adds a drawn winner to the log of the giveaway they were drawn from.

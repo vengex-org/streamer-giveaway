@@ -692,3 +692,29 @@ sk = "Nikto s takým menom nie je prihlásený."
 en = "Nobody with that name has entered."
 cs = "Nikdo s takovým jménem není přihlášený."
 es = "Nadie con ese nombre se ha inscrito."
+
+# Demo window from the header
+
+[header.demo.button]
+sk = "Vyskúšať demo"
+en = "Try demo"
+cs = "Vyzkoušet demo"
+es = "Probar demo"
+
+[header.demo.tooltip]
+sk = "Otvorí druhé okno so simulovaným chatom. Tvoje nastavenia a kanál sa nezmenia."
+en = "Opens a second window with a simulated chat. Your settings and channel stay as they are."
+cs = "Otevře druhé okno se simulovaným chatem. Tvoje nastavení a kanál se nezmění."
+es = "Abre una segunda ventana con un chat simulado. Tu configuración y tu canal no cambian."
+
+[header.demo.badge]
+sk = "Demo"
+en = "Demo"
+cs = "Demo"
+es = "Demo"
+
+[error.demo]
+sk = "Demo sa nepodarilo spustiť: %{cause}"
+en = "Could not start the demo: %{cause}"
+cs = "Demo se nepodařilo spustit: %{cause}"
+es = "No se pudo iniciar la demo: %{cause}"

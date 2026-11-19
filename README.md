@@ -15,8 +15,7 @@ login or a browser source.
 - Chat goes straight from Twitch to your PC. An entry shows up the moment its message arrives,
   with no web dashboard or cloud bot in between.
 - Setup takes a minute: type your channel name, pick a keyword, open entries.
-- You can rehearse before going live. Demo mode plays a whole giveaway for any audience size, for
-  example 8000 viewers.
+- You can rehearse before going live. "Try demo" opens a second window with a simulated chat.
 
 ## Features
 
@@ -47,6 +46,11 @@ login or a browser source.
 | ![Entries](docs/entries-dark.png) | ![Winner](docs/winner-dark.png) | ![Rules and search](docs/rules-search-light.png) |
 
 ## Try it without a stream
+
+Press "Try demo" in the top bar. A second window opens with a simulated chat, so you can run a
+whole giveaway without going live. Your real settings and channel stay as they are.
+
+From a terminal the same window starts with:
 
 ```sh
 cargo run --release -- --demo

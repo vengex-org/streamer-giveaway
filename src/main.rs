@@ -6,7 +6,7 @@ use streamer_giveaway::chat::{ChatBridge, connection_problem_layer};
 use streamer_giveaway::demo;
 use streamer_giveaway::domain::chat::{ChannelLogin, Keyword};
 use streamer_giveaway::storage::{ConfigStore, Loaded};
-use streamer_giveaway::ui::AppView;
+use streamer_giveaway::ui::{AppView, RunMode};
 use tracing_subscriber::prelude::*;
 
 fn main() {
@@ -30,6 +30,11 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let crowd = demo_crowd(&args);
     let demo_mode = crowd.is_some() || args.iter().any(|arg| arg == "--demo");
+    let mode = if demo_mode {
+        RunMode::Demo
+    } else {
+        RunMode::Live
+    };
     let store = if demo_mode {
         ConfigStore::demo_in_user_config_dir()
     } else {
@@ -76,7 +81,10 @@ fn main() {
             gpui_kit::init(cx);
             let options = WindowOptions {
                 titlebar: Some(TitlebarOptions {
-                    title: Some("Streamer Giveaway".into()),
+                    title: Some(match mode {
+                        RunMode::Live => "Streamer Giveaway".into(),
+                        RunMode::Demo => "Streamer Giveaway (demo)".into(),
+                    }),
                     ..Default::default()
                 }),
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
@@ -87,7 +95,7 @@ fn main() {
                 ..Default::default()
             };
             gpui_kit::open_window(options, cx, move |window, cx| {
-                cx.new(|cx| AppView::new(bridge, store, config, warning, window, cx))
+                cx.new(|cx| AppView::new(mode, bridge, store, config, warning, window, cx))
             })
             .expect("failed to open the main window");
         });
