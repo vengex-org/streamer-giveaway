@@ -31,6 +31,10 @@ const BACKOFF: [std::time::Duration; 5] = [
     std::time::Duration::from_secs(30),
 ];
 
+/// How long a connection must hold before a drop counts as a fresh start for [`BACKOFF`]. A chat
+/// that accepts the socket and then closes it at once would otherwise be retried every second.
+const STABLE: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// A chat to read: a Twitch channel, a Kick channel or a YouTube stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatTarget {
@@ -212,8 +216,8 @@ impl Link {
 }
 
 /// Runs `attempt` until the UI is gone or the chat cannot be read, reconnecting after drops with
-/// [`BACKOFF`]. The wait starts over once an attempt reaches the chat, so a stream that drops now
-/// and then always reconnects quickly.
+/// [`BACKOFF`]. The wait starts over once an attempt held the chat for [`STABLE`], so a stream
+/// that drops now and then always reconnects quickly.
 async fn run_with_retries(
     target: ChatTarget,
     events: async_channel::Sender<ChatEvent>,
@@ -260,10 +264,13 @@ async fn run_with_retries(
             events: events.clone(),
             reached: std::sync::atomic::AtomicBool::new(false),
         };
+        let started = tokio::time::Instant::now();
         let stop = attempt(&client, &link).await;
         if link.reached() {
             ever_reached = true;
-            failures = 0;
+            if started.elapsed() >= STABLE {
+                failures = 0;
+            }
         }
         match stop {
             Stop::UiGone => return,
@@ -515,11 +522,29 @@ mod tests {
                 return Stop::UiGone;
             }
             link.connected().await;
+            tokio::time::sleep(STABLE).await;
             Stop::Retry("drop".into())
         })
         .await;
-        // Five drops, each after a successful connect: five waits of the first, shortest step.
-        assert_eq!(start.elapsed(), BACKOFF[0] * 5);
+        // Five drops, each after a connection that held: five waits of the first, shortest step.
+        assert_eq!(start.elapsed(), (STABLE + BACKOFF[0]) * 5);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_connection_that_drops_at_once_still_waits_longer_each_time() {
+        let (events, _received) = async_channel::unbounded();
+        let mut attempts = 0;
+        let start = tokio::time::Instant::now();
+        run_with_retries(kick_target(), events, async |_, link: &Link| {
+            attempts += 1;
+            if attempts > 3 {
+                return Stop::UiGone;
+            }
+            link.connected().await;
+            Stop::Retry("kicked".into())
+        })
+        .await;
+        assert_eq!(start.elapsed(), BACKOFF[0] + BACKOFF[1] + BACKOFF[2]);
     }
 
     #[tokio::test(start_paused = true)]
