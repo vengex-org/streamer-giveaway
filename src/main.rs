@@ -1,3 +1,6 @@
+// Release builds open only the app window, no console; debug builds keep the console for logs.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use gpui_kit::*;
 use streamer_giveaway::chat::{ChatBridge, connection_problem_layer};
 use streamer_giveaway::demo;
