@@ -105,6 +105,7 @@ impl AppView {
                     .border_color(p.accent)
                     .child(
                         h_flex()
+                            .flex_wrap()
                             .justify_between()
                             .gap_2()
                             .child(
@@ -347,7 +348,10 @@ impl AppView {
                     .child(t!("winner.since", time = elapsed).into_owned()),
             )
             .child(status)
-            .child(
+            // The replies box appears with the first reply; until then empty space, not an empty box.
+            .child(if watch.replies().is_empty() {
+                div().flex_1().into_any_element()
+            } else {
                 v_flex()
                     .id("replies")
                     .w_full()
@@ -357,8 +361,9 @@ impl AppView {
                     .overflow_y_scroll()
                     .rounded_md()
                     .bg(p.surface_alt)
-                    .children(replies),
-            )
+                    .children(replies)
+                    .into_any_element()
+            })
             .child(
                 h_flex()
                     .gap_3()
