@@ -19,6 +19,7 @@ use crate::domain::config::Config;
 use crate::domain::eligibility::{ActiveWindow, Eligibility, TimeUnit};
 use crate::domain::giveaway::{DrawOutcome, Giveaway, GiveawayState, MessageOutcome};
 use crate::domain::matcher::MatchMode;
+use crate::domain::platform::UserKey;
 use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
 use crate::domain::role::{Role, Weights};
 use crate::domain::session_log::{self, LogKind, SessionLog};
@@ -325,7 +326,7 @@ impl AppView {
                 }
                 if let Some(session) = &mut self.session {
                     let kind = LogKind::from_outcome(outcome, matched);
-                    session.record(now, kind, &msg.user().id, msg.display_name());
+                    session.record(now, kind, msg.user(), msg.display_name());
                     self.stats.record_message(now);
                     if outcome == MessageOutcome::Entered {
                         self.stats.record_entry(now);
@@ -580,7 +581,7 @@ impl AppView {
             .collect();
         match self.giveaway.draw(&weights, &mut rand::rng()) {
             DrawOutcome::Winner(winner) => {
-                self.log_winner(&winner.user.id, &winner.display_name);
+                self.log_winner(&winner.user, &winner.display_name);
                 let reel = stage::reveal_reel(&pool, &winner.display_name, &mut rand::rng());
                 self.send(ChatCommand::WinnerDrawn(winner.user.clone()));
                 self.stage = Stage::Revealing {
@@ -687,16 +688,12 @@ impl AppView {
     }
 
     /// Adds a drawn winner to the log of the giveaway they were drawn from.
-    fn log_winner(&mut self, user_id: &str, display_name: &str) {
+    fn log_winner(&mut self, user: &UserKey, display_name: &str) {
         let Some(log) = &self.last_log else {
             return;
         };
-        let row = session_log::csv_row(
-            log.opened_at.elapsed(),
-            LogKind::Winner,
-            user_id,
-            display_name,
-        );
+        let row =
+            session_log::csv_row(log.opened_at.elapsed(), LogKind::Winner, user, display_name);
         if let Err(err) = storage::append_session_row(&log.path, &row) {
             self.set_notice(NoticeSource::Log, Some(Notice::LogFailed(err.to_string())));
         }

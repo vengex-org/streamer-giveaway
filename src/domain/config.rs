@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::chat::{ChannelLogin, Keyword};
 use super::eligibility::Eligibility;
 use super::matcher::MatchMode;
+use super::platform::{KickChannel, Platform, YouTubeSource};
 use super::prefs::{Language, ThemeChoice, lenient, lenient_or_default};
 use super::role::Weights;
 
@@ -10,7 +11,15 @@ use super::role::Weights;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// One platform, or several chats at once.
+    #[serde(deserialize_with = "lenient_or_default")]
+    pub chat_mode: ChatMode,
+    /// Twitch channel.
     pub channel: Option<ChannelLogin>,
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    pub kick_channel: Option<KickChannel>,
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    pub youtube_source: Option<YouTubeSource>,
     pub keyword: Keyword,
     pub mode: MatchMode,
     pub weights: Weights,
@@ -28,7 +37,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            chat_mode: ChatMode::default(),
             channel: None,
+            kick_channel: None,
+            youtube_source: None,
             keyword: Keyword::parse("YEP").expect("default keyword is not empty"),
             mode: MatchMode::default(),
             weights: Weights::default(),
@@ -36,6 +48,20 @@ impl Default for Config {
             language: None,
             theme: None,
         }
+    }
+}
+
+/// Whether the giveaway reads one platform's chat or several at once (multistream).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatMode {
+    Single(Platform),
+    Multi,
+}
+
+impl Default for ChatMode {
+    fn default() -> Self {
+        Self::Single(Platform::Twitch)
     }
 }
 
@@ -146,5 +172,39 @@ theme = \"neon\"
     #[test]
     fn invalid_channel_is_rejected() {
         assert!(Config::from_toml("channel = \"#bad name\"\n").is_err());
+    }
+
+    #[test]
+    fn platform_choice_and_inputs_round_trip() {
+        for chat_mode in [ChatMode::Single(Platform::Kick), ChatMode::Multi] {
+            let config = Config {
+                chat_mode,
+                kick_channel: Some(KickChannel::parse("xqc").unwrap()),
+                youtube_source: Some(YouTubeSource::parse("@IShowSpeed").unwrap()),
+                ..Config::default()
+            };
+            let text = config.to_toml().unwrap();
+            assert_eq!(Config::from_toml(&text).unwrap(), config, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_settings_file_from_before_kick_and_youtube_loads_as_twitch_only() {
+        let text = "channel = \"streamer\"\nkeyword = \"YEP\"\nmode = \"word\"\n";
+        let config = Config::from_toml(text).unwrap();
+        assert_eq!(config.chat_mode, ChatMode::Single(Platform::Twitch));
+        assert_eq!(config.kick_channel, None);
+        assert_eq!(config.youtube_source, None);
+        assert_eq!(config.channel.unwrap().as_str(), "streamer");
+    }
+
+    #[test]
+    fn an_unreadable_platform_setting_is_dropped_and_the_rest_kept() {
+        let text = "chat_mode = \"teams\"\nkick_channel = \"a b\"\nyoutube_source = \"https://vimeo.com/1\"\nkeyword = \"GO\"\n";
+        let config = Config::from_toml(text).unwrap();
+        assert_eq!(config.chat_mode, ChatMode::default());
+        assert_eq!(config.kick_channel, None);
+        assert_eq!(config.youtube_source, None);
+        assert_eq!(config.keyword.as_str(), "GO");
     }
 }
