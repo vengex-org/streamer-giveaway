@@ -40,6 +40,17 @@ Demo mode replaces Twitch with a simulated chat on `#pixelpaladin`: 6000 message
 minutes from about 2400 chatters, most of them typing `GIVEME`. The drawn winner answers a few
 seconds after the draw. Demo settings are stored separately and never touch your real ones.
 
+To rehearse a big giveaway, give the audience size instead:
+
+```sh
+cargo run --release -- --demo-viewers=8000
+```
+
+By default 40 % of the viewers enter, half of them within 20 seconds of the announcement, with
+15 other chat messages per second around them. `--demo-share=0.6`, `--demo-half-life=45`,
+`--demo-chat=30` and `--demo-cap=100` (Twitch delivering at most 100 messages per second) change
+that. These defaults are guesses; the CSV log of a real giveaway shows the real values.
+
 ## Download
 
 Windows builds are on the [releases page](https://github.com/vengex-org/streamer-giveaway/releases).
@@ -86,6 +97,9 @@ cargo fmt --check
 - `src/chat.rs` reads Twitch chat on its own thread; `src/demo.rs` is the simulated chat.
 - `src/ui/` is the window: `steps.rs` (left column), `stage.rs` (the part viewers see),
   `header.rs`, `palette.rs` (colors for both themes).
+- `cargo run --release --example chat_rate -- <channel> 60` measures a live chat for 60 seconds
+  (messages per second, peak, unique chatters). `cargo run --release --example raffle_sim` prints
+  how long giveaways take for several audience sizes and delivery caps.
 - Texts live in `locales/app.toml`. A test fails when a language is missing or when UI code passes
   text that is not translated.
 

@@ -1,5 +1,6 @@
 //! Simulated Twitch chat for trying the app, recording screenshots and testing big giveaways
-//! without a live stream. Start the app with `--demo`.
+//! without a live stream. Start the app with `--demo`, or `--demo-viewers=8000` (see [`Crowd`])
+//! for a giveaway announced to a large audience.
 
 use std::thread;
 use std::time::{Duration, Instant};
@@ -75,15 +76,15 @@ struct Chatter {
     badges: Vec<Badge>,
 }
 
-fn chatters(rng: &mut StdRng) -> Vec<Chatter> {
-    (1..=CHATTERS)
+fn chatters(rng: &mut StdRng, count: usize) -> Vec<Chatter> {
+    (1..=count)
         .map(|i| {
             let first = FIRST[i % FIRST.len()];
             let second = SECOND[(i / FIRST.len()) % SECOND.len()];
             let name = match i % 3 {
-                0 => format!("{first}{second}"),
-                1 => format!("{first}_{second}{}", i % 97),
-                _ => format!("{}{}{}", first.to_lowercase(), second, i % 1000),
+                0 if count <= CHATTERS => format!("{first}{second}"),
+                1 => format!("{first}_{second}{i}"),
+                _ => format!("{}{}{}", first.to_lowercase(), second, i),
             };
             Chatter {
                 user_id: i.to_string(),
@@ -117,7 +118,7 @@ fn badges(rng: &mut StdRng) -> Vec<Badge> {
 /// order. The same seed gives the same feed.
 pub fn feed(seed: u64) -> Vec<(Duration, ChatMessage)> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let people = chatters(&mut rng);
+    let people = chatters(&mut rng, CHATTERS);
     let span = FEED_DURATION.as_millis() as u64;
     let mut offsets: Vec<u64> = (0..TOTAL_MESSAGES)
         .map(|_| rng.random_range(0..span))
@@ -148,6 +149,127 @@ pub fn feed(seed: u64) -> Vec<(Duration, ChatMessage)> {
         .collect()
 }
 
+/// A giveaway announced to a large audience. Each entrant types the keyword once at a random
+/// moment after the announcement; how fast they react follows an exponential curve with the
+/// given half-life. Ordinary chat runs alongside. `cap` models Twitch delivering at most that many
+/// messages per second: anything above waits for the next free second.
+///
+/// The defaults are assumptions, not measurements; tomorrow's CSV log calibrates them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Crowd {
+    pub viewers: usize,
+    /// Share of viewers who enter.
+    pub entry_share: f64,
+    /// Half of the entrants have typed the keyword this long after the announcement.
+    pub half_life: Duration,
+    /// Messages per second that are not entries.
+    pub chat_per_second: f64,
+    /// Most messages Twitch delivers per second; `None` = no limit.
+    pub cap: Option<u32>,
+}
+
+impl Crowd {
+    pub fn with_viewers(viewers: usize) -> Self {
+        Self {
+            viewers,
+            entry_share: 0.4,
+            half_life: Duration::from_secs(20),
+            chat_per_second: 15.0,
+            cap: None,
+        }
+    }
+
+    pub fn entrants(&self) -> usize {
+        (self.viewers as f64 * self.entry_share).round() as usize
+    }
+}
+
+/// No entrant reacts later than this after the announcement.
+const LATEST_ENTRY: Duration = Duration::from_secs(600);
+/// Share of entrants who type the keyword a second time.
+const REPEAT_SHARE: f64 = 0.15;
+
+/// The feed of a [`Crowd`] giveaway, in delivery order.
+pub fn crowd_feed(crowd: Crowd, seed: u64) -> Vec<(Duration, ChatMessage)> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let entrants = crowd.entrants();
+    // Viewers who only chat are drawn from a pool the size of the audience.
+    let people = chatters(&mut rng, crowd.viewers.max(entrants).max(1));
+    let tau = crowd.half_life.as_secs_f64() / std::f64::consts::LN_2;
+    let reaction = |rng: &mut StdRng| {
+        let u: f64 = rng.random_range(f64::EPSILON..1.0);
+        Duration::from_secs_f64((-tau * u.ln()).min(LATEST_ENTRY.as_secs_f64()))
+    };
+    let mut events: Vec<(Duration, ChatMessage)> = Vec::new();
+    let mut last = Duration::ZERO;
+    for who in &people[..entrants] {
+        let at = reaction(&mut rng);
+        last = last.max(at);
+        events.push((at, message(who, DEMO_KEYWORD)));
+        if rng.random_bool(REPEAT_SHARE) {
+            events.push((at + reaction(&mut rng), message(who, DEMO_KEYWORD)));
+        }
+    }
+    let span = last + Duration::from_secs(30);
+    let chat_lines = (crowd.chat_per_second * span.as_secs_f64()) as usize;
+    for _ in 0..chat_lines {
+        let who = people.choose(&mut rng).expect("chatters exist");
+        let line = CHATTER.choose(&mut rng).expect("lines exist");
+        let at = Duration::from_millis(rng.random_range(0..span.as_millis() as u64));
+        events.push((at, message(who, line)));
+    }
+    events.sort_by_key(|(at, _)| *at);
+    match crowd.cap {
+        Some(cap) => throttle(events, cap.max(1)),
+        None => events,
+    }
+}
+
+/// Delivers at most `cap` messages per second in order; the rest wait for the next free second.
+fn throttle(events: Vec<(Duration, ChatMessage)>, cap: u32) -> Vec<(Duration, ChatMessage)> {
+    let slot = Duration::from_secs(1) / cap;
+    let mut next_free = Duration::ZERO;
+    events
+        .into_iter()
+        .map(|(at, msg)| {
+            let delivered = at.max(next_free);
+            next_free = delivered + slot;
+            (delivered, msg)
+        })
+        .collect()
+}
+
+/// When the entrants of a feed came in: the moments by which half, 90 %, 99 % and all of them
+/// had typed the keyword for the first time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RaffleTimes {
+    pub entrants: usize,
+    pub half: Duration,
+    pub ninety: Duration,
+    pub ninety_nine: Duration,
+    pub all: Duration,
+}
+
+pub fn raffle_times(feed: &[(Duration, ChatMessage)]) -> RaffleTimes {
+    let mut seen = std::collections::HashSet::new();
+    let firsts: Vec<Duration> = feed
+        .iter()
+        .filter(|(_, m)| m.text == DEMO_KEYWORD && seen.insert(m.user_id.as_str()))
+        .map(|(at, _)| *at)
+        .collect();
+    let at_share = |share: f64| {
+        let index = ((firsts.len() as f64 * share).ceil() as usize).clamp(1, firsts.len().max(1));
+        firsts.get(index - 1).copied().unwrap_or_default()
+    };
+    RaffleTimes {
+        entrants: firsts.len(),
+        half: at_share(0.5),
+        ninety: at_share(0.9),
+        ninety_nine: at_share(0.99),
+        all: firsts.last().copied().unwrap_or_default(),
+    }
+}
+
 fn message(who: &Chatter, text: &str) -> ChatMessage {
     ChatMessage {
         user_id: who.user_id.clone(),
@@ -157,23 +279,30 @@ fn message(who: &Chatter, text: &str) -> ChatMessage {
     }
 }
 
-/// Starts the simulated chat; it behaves like [`ChatBridge::spawn`] for the UI.
-pub fn spawn() -> std::io::Result<ChatBridge> {
+/// Starts the simulated chat; it behaves like [`ChatBridge::spawn`] for the UI. Without a crowd it
+/// plays the standard 6000-message feed.
+pub fn spawn(crowd: Option<Crowd>) -> std::io::Result<ChatBridge> {
     let (command_tx, command_rx) = async_channel::unbounded();
     let (event_tx, event_rx) = async_channel::unbounded();
+    let script = match crowd {
+        Some(crowd) => crowd_feed(crowd, 42),
+        None => feed(42),
+    };
     thread::Builder::new()
         .name("demo-chat".into())
-        .spawn(move || run(command_rx, event_tx))?;
+        .spawn(move || run(script, command_rx, event_tx))?;
     Ok(ChatBridge {
         commands: command_tx,
         events: event_rx,
     })
 }
 
-fn run(commands: async_channel::Receiver<ChatCommand>, events: async_channel::Sender<ChatEvent>) {
+fn run(
+    script: Vec<(Duration, ChatMessage)>,
+    commands: async_channel::Receiver<ChatCommand>,
+    events: async_channel::Sender<ChatEvent>,
+) {
     let mut rng = StdRng::seed_from_u64(7);
-    let people = chatters(&mut rng);
-    let script = feed(42);
     let mut started: Option<Instant> = None;
     let mut next = 0;
     let mut idle_at = Instant::now();
@@ -203,12 +332,18 @@ fn run(commands: async_channel::Receiver<ChatCommand>, events: async_channel::Se
                     }
                 }
                 ChatCommand::WinnerDrawn(user_id) => {
-                    let winner = people.iter().find(|c| c.user_id == user_id);
+                    let winner = script.iter().map(|(_, m)| m).find(|m| m.user_id == user_id);
                     if let Some(winner) = winner {
                         let now = Instant::now();
                         for (i, text) in WINNER_REPLIES.iter().enumerate() {
                             let at = now + WINNER_REPLY_AFTER + Duration::from_secs(4 * i as u64);
-                            replies.push((at, message(winner, text)));
+                            replies.push((
+                                at,
+                                ChatMessage {
+                                    text: (*text).to_owned(),
+                                    ..winner.clone()
+                                },
+                            ));
                         }
                     }
                 }
@@ -227,9 +362,13 @@ fn run(commands: async_channel::Receiver<ChatCommand>, events: async_channel::Se
                 next += 1;
             }
             if next == script.len() && now >= idle_at {
-                let who = people.choose(&mut rng).expect("chatters exist");
+                let (_, author) = script.choose(&mut rng).expect("the feed is not empty");
                 let line = CHATTER.choose(&mut rng).expect("lines exist");
-                if !send(ChatEvent::Message(message(who, line))) {
+                let chatter = ChatMessage {
+                    text: (*line).to_owned(),
+                    ..author.clone()
+                };
+                if !send(ChatEvent::Message(chatter)) {
                     return;
                 }
                 idle_at = now + IDLE_MESSAGE_EVERY;
@@ -298,5 +437,45 @@ mod tests {
                 .or_insert_with(|| m.badges.clone());
             assert_eq!(first, &m.badges, "user {}", m.user_id);
         }
+    }
+
+    #[test]
+    fn crowd_has_the_expected_entrants_and_half_of_them_within_the_half_life() {
+        let crowd = Crowd::with_viewers(8000);
+        let times = raffle_times(&crowd_feed(crowd, 42));
+        assert_eq!(times.entrants, 3200);
+        let half = times.half.as_secs_f64();
+        assert!((17.0..23.0).contains(&half), "half after {half} s");
+        assert!(times.ninety < times.ninety_nine && times.ninety_nine <= times.all);
+    }
+
+    #[test]
+    fn a_delivery_cap_below_the_entry_rush_delays_entries() {
+        let free = Crowd::with_viewers(20_000);
+        let capped = Crowd {
+            cap: Some(50),
+            ..free
+        };
+        let free_times = raffle_times(&crowd_feed(free, 42));
+        let capped_times = raffle_times(&crowd_feed(capped, 42));
+        // About 4000 entries arrive in the first 20 s; at 50 per second the median slips.
+        assert!(capped_times.half > free_times.half * 3, "{capped_times:?}");
+        assert!(capped_times.all >= free_times.all);
+    }
+
+    #[test]
+    fn throttle_spaces_messages_evenly_above_the_cap() {
+        let msg = |n: u32| ChatMessage {
+            user_id: n.to_string(),
+            display_name: "x".into(),
+            badges: vec![],
+            text: "x".into(),
+        };
+        let burst: Vec<_> = (0..4).map(|n| (Duration::ZERO, msg(n))).collect();
+        let times: Vec<_> = throttle(burst, 2).into_iter().map(|(t, _)| t).collect();
+        assert_eq!(
+            times,
+            [0, 500, 1000, 1500].map(Duration::from_millis).to_vec()
+        );
     }
 }

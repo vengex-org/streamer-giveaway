@@ -21,8 +21,12 @@ fn main() {
         )
         .init();
 
-    // `--demo` swaps Twitch for a simulated chat and keeps its own settings file.
-    let demo_mode = std::env::args().any(|arg| arg == "--demo");
+    // `--demo` swaps Twitch for a simulated chat and keeps its own settings file;
+    // `--demo-viewers=N` (with optional `--demo-share`, `--demo-half-life`, `--demo-chat`,
+    // `--demo-cap`) plays a giveaway announced to N viewers instead.
+    let args: Vec<String> = std::env::args().collect();
+    let crowd = demo_crowd(&args);
+    let demo_mode = crowd.is_some() || args.iter().any(|arg| arg == "--demo");
     let store = if demo_mode {
         ConfigStore::demo_in_user_config_dir()
     } else {
@@ -55,7 +59,7 @@ fn main() {
             config.channel = ChannelLogin::parse(demo::DEMO_CHANNEL).ok();
             config.keyword = Keyword::parse(demo::DEMO_KEYWORD).expect("demo keyword is not empty");
         }
-        demo::spawn()
+        demo::spawn(crowd)
     } else {
         ChatBridge::spawn(problems)
     }
@@ -80,4 +84,26 @@ fn main() {
         })
         .expect("failed to open the main window");
     });
+}
+
+/// Reads `--demo-viewers=N` and its companions; `None` when no viewer count is given.
+fn demo_crowd(args: &[String]) -> Option<demo::Crowd> {
+    let value = |name: &str| {
+        args.iter()
+            .find_map(|arg| arg.strip_prefix(name)?.strip_prefix('='))
+            .map(str::to_owned)
+    };
+    let viewers = value("--demo-viewers")?.parse().ok()?;
+    let mut crowd = demo::Crowd::with_viewers(viewers);
+    if let Some(share) = value("--demo-share").and_then(|v| v.parse().ok()) {
+        crowd.entry_share = share;
+    }
+    if let Some(secs) = value("--demo-half-life").and_then(|v| v.parse().ok()) {
+        crowd.half_life = std::time::Duration::from_secs(secs);
+    }
+    if let Some(rate) = value("--demo-chat").and_then(|v| v.parse().ok()) {
+        crowd.chat_per_second = rate;
+    }
+    crowd.cap = value("--demo-cap").and_then(|v| v.parse().ok());
+    Some(crowd)
 }
