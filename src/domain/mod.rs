@@ -1,3 +1,4 @@
+pub mod badges;
 pub mod chat;
 pub mod config;
 pub mod eligibility;
@@ -5,6 +6,7 @@ pub mod giveaway;
 pub mod matcher;
 pub mod prefs;
 pub mod role;
+pub mod search;
 pub mod session_log;
 pub mod stats;
 pub mod winner;
