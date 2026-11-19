@@ -5,6 +5,7 @@ use rust_i18n::t;
 
 use crate::domain::eligibility::TimeUnit;
 use crate::domain::matcher::MatchMode;
+use crate::domain::platform::Platform;
 use crate::domain::prefs::Language;
 use crate::domain::role::Role;
 
@@ -39,6 +40,15 @@ pub fn language_name(language: Language) -> &'static str {
         Language::En => "English",
         Language::Cs => "Čeština",
         Language::Es => "Español",
+    }
+}
+
+/// Platform names are brands, the same in every language.
+pub fn platform_name(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Twitch => "Twitch",
+        Platform::Kick => "Kick",
+        Platform::YouTube => "YouTube",
     }
 }
 

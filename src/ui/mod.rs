@@ -15,11 +15,11 @@ use rust_i18n::t;
 use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ChatTarget, ConnectionStatus};
 use crate::domain::badges::{self, BadgeImages};
 use crate::domain::chat::{ChannelLogin, Keyword};
-use crate::domain::config::Config;
+use crate::domain::config::{ChatMode, Config};
 use crate::domain::eligibility::{ActiveWindow, Eligibility, TimeUnit};
 use crate::domain::giveaway::{DrawOutcome, Giveaway, GiveawayState, MessageOutcome};
 use crate::domain::matcher::MatchMode;
-use crate::domain::platform::{KickChannel, Platform, UserKey};
+use crate::domain::platform::{KickChannel, Platform, UserKey, YouTubeSource};
 use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
 use crate::domain::role::{Role, Weights};
 use crate::domain::session_log::{self, LogKind, SessionLog};
@@ -69,6 +69,8 @@ enum Notice {
     ChatStopped,
     ChatRejected(String),
     ChannelInvalid(String),
+    KickInvalid(String),
+    YouTubeInvalid(String),
     KeywordEmpty,
     WeightInvalid(Role),
     WindowInvalid,
@@ -84,6 +86,8 @@ impl Notice {
             Notice::ChatStopped => t!("error.chat_stopped"),
             Notice::ChatRejected(cause) => t!("error.chat_rejected", cause = cause),
             Notice::ChannelInvalid(raw) => t!("error.channel_invalid", raw = raw),
+            Notice::KickInvalid(raw) => t!("error.kick_invalid", raw = raw),
+            Notice::YouTubeInvalid(raw) => t!("error.youtube_invalid", raw = raw),
             Notice::KeywordEmpty => t!("error.keyword_empty"),
             Notice::WindowInvalid => t!("error.window_invalid"),
             Notice::LogFailed(cause) => t!("error.log", cause = cause),
@@ -108,7 +112,8 @@ pub struct AppView {
     store: Option<ConfigStore>,
     giveaway: Giveaway,
     commands: async_channel::Sender<ChatCommand>,
-    status: ConnectionStatus,
+    /// Each platform's chat connection; a missing platform is idle.
+    statuses: BTreeMap<Platform, ConnectionStatus>,
     notices: BTreeMap<NoticeSource, Notice>,
     stage: Stage,
     /// Whether the rules step shows its editor (weights and entry conditions).
@@ -118,6 +123,8 @@ pub struct AppView {
     os_language: Language,
     palette: Palette,
     channel_input: Entity<InputState>,
+    kick_input: Entity<InputState>,
+    youtube_input: Entity<InputState>,
     keyword_input: Entity<InputState>,
     weight_inputs: Vec<(Role, Entity<InputState>)>,
     window_input: Entity<InputState>,
@@ -172,6 +179,18 @@ impl AppView {
                 .placeholder(t!("step.connect.placeholder"))
                 .default_value(channel.unwrap_or_default())
         });
+        let kick_channel = config.kick_channel.as_ref().map(|c| c.as_str().to_owned());
+        let kick_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("step.connect.placeholder_kick"))
+                .default_value(kick_channel.unwrap_or_default())
+        });
+        let youtube_source = config.youtube_source.as_ref().map(ToString::to_string);
+        let youtube_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("step.connect.placeholder_youtube"))
+                .default_value(youtube_source.unwrap_or_default())
+        });
         let keyword_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(t!("step.keyword.placeholder"))
@@ -214,7 +233,21 @@ impl AppView {
                 };
                 this.set_language(*choice, window, cx);
             }),
-            cx.subscribe_in(&channel_input, window, Self::on_channel_input),
+            cx.subscribe_in(&channel_input, window, |this, _, event, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.connect(Platform::Twitch, cx);
+                }
+            }),
+            cx.subscribe_in(&kick_input, window, |this, _, event, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.connect(Platform::Kick, cx);
+                }
+            }),
+            cx.subscribe_in(&youtube_input, window, |this, _, event, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.connect(Platform::YouTube, cx);
+                }
+            }),
             cx.subscribe_in(&search_input, window, |this, _, event, _, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.refresh_search(cx);
@@ -263,7 +296,7 @@ impl AppView {
             config,
             store,
             commands: bridge.commands,
-            status: ConnectionStatus::Idle,
+            statuses: BTreeMap::new(),
             notices: startup_notice
                 .map(|cause| (NoticeSource::Startup, Notice::Startup(cause)))
                 .into_iter()
@@ -274,6 +307,8 @@ impl AppView {
             os_language,
             palette,
             channel_input,
+            kick_input,
+            youtube_input,
             keyword_input,
             weight_inputs,
             window_input,
@@ -336,44 +371,24 @@ impl AppView {
                 let replied = self.stage.on_message(&msg, now);
                 outcome != MessageOutcome::Ignored || replied
             }
-            // Only Twitch until the UI shows one status per platform.
-            ChatEvent::Status(Platform::Twitch, status) => {
-                if let ConnectionStatus::Connected(ChatTarget::Twitch(channel)) = &status {
-                    let joined = !matches!(
-                        &self.status,
-                        ConnectionStatus::Connected(ChatTarget::Twitch(c)) if c == channel
-                    );
-                    if joined {
-                        self.load_badges(channel.clone(), cx);
+            ChatEvent::Status(platform, status) => {
+                // A channel's badge list loads once per channel, not on every reconnect.
+                if let ConnectionStatus::Connected(target) = &status
+                    && !matches!(self.status(platform), ConnectionStatus::Connected(t) if t == target)
+                {
+                    match target {
+                        ChatTarget::Twitch(channel) => self.load_badges(channel.clone(), cx),
+                        ChatTarget::Kick(channel) => self.load_kick_badges(channel, cx),
+                        ChatTarget::YouTube(_) => {}
                     }
                 }
-                self.status = status;
+                self.statuses.insert(platform, status);
                 true
             }
-            ChatEvent::Status(
-                Platform::Kick,
-                ConnectionStatus::Connected(ChatTarget::Kick(channel)),
-            ) => {
-                self.load_kick_badges(&channel, cx);
-                false
-            }
-            ChatEvent::Status(Platform::Kick | Platform::YouTube, _) => false,
             ChatEvent::Rejected(reason) => {
                 self.set_notice(NoticeSource::Chat, Some(Notice::ChatRejected(reason)));
                 true
             }
-        }
-    }
-
-    fn on_channel_input(
-        &mut self,
-        _: &Entity<InputState>,
-        event: &InputEvent,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if matches!(event, InputEvent::PressEnter { .. }) {
-            self.connect(cx);
         }
     }
 
@@ -427,26 +442,79 @@ impl AppView {
         };
     }
 
-    fn connect(&mut self, cx: &mut Context<Self>) {
-        let raw = self.channel_input.read(cx).value();
-        match ChannelLogin::parse(&raw) {
-            Ok(channel) => {
-                self.send(ChatCommand::Join(ChatTarget::Twitch(channel.clone())));
-                self.config.channel = Some(channel);
+    fn status(&self, platform: Platform) -> &ConnectionStatus {
+        const IDLE: &ConnectionStatus = &ConnectionStatus::Idle;
+        self.statuses.get(&platform).unwrap_or(IDLE)
+    }
+
+    /// Whether any chat feeds the giveaway right now.
+    fn any_connected(&self) -> bool {
+        self.statuses
+            .values()
+            .any(|status| matches!(status, ConnectionStatus::Connected(_)))
+    }
+
+    fn input(&self, platform: Platform) -> &Entity<InputState> {
+        match platform {
+            Platform::Twitch => &self.channel_input,
+            Platform::Kick => &self.kick_input,
+            Platform::YouTube => &self.youtube_input,
+        }
+    }
+
+    /// Reads the platform's input and joins that chat; a typo shows a notice instead.
+    fn connect(&mut self, platform: Platform, cx: &mut Context<Self>) {
+        let raw = self.input(platform).read(cx).value().to_string();
+        let target = match platform {
+            Platform::Twitch => ChannelLogin::parse(&raw)
+                .map(ChatTarget::Twitch)
+                .map_err(|_| Notice::ChannelInvalid(raw.clone())),
+            Platform::Kick => KickChannel::parse(&raw)
+                .map(ChatTarget::Kick)
+                .map_err(|_| Notice::KickInvalid(raw.clone())),
+            Platform::YouTube => YouTubeSource::parse(&raw)
+                .map(ChatTarget::YouTube)
+                .map_err(|_| Notice::YouTubeInvalid(raw.clone())),
+        };
+        match target {
+            Ok(target) => {
+                match &target {
+                    ChatTarget::Twitch(channel) => self.config.channel = Some(channel.clone()),
+                    ChatTarget::Kick(channel) => self.config.kick_channel = Some(channel.clone()),
+                    ChatTarget::YouTube(source) => {
+                        self.config.youtube_source = Some(source.clone());
+                    }
+                }
+                self.send(ChatCommand::Join(target));
                 self.set_notice(NoticeSource::Channel, None);
                 self.set_notice(NoticeSource::Chat, None);
                 self.save();
             }
-            Err(_) => self.set_notice(
-                NoticeSource::Channel,
-                Some(Notice::ChannelInvalid(raw.to_string())),
-            ),
+            Err(notice) => self.set_notice(NoticeSource::Channel, Some(notice)),
         }
         cx.notify();
     }
 
-    fn disconnect(&mut self, cx: &mut Context<Self>) {
-        self.send(ChatCommand::Leave(Platform::Twitch));
+    fn disconnect(&mut self, platform: Platform, cx: &mut Context<Self>) {
+        self.send(ChatCommand::Leave(platform));
+        cx.notify();
+    }
+
+    /// One platform or multistream. Switching to one platform leaves the other chats, so the
+    /// giveaway only takes entries from the chat on screen.
+    fn set_chat_mode(&mut self, mode: ChatMode, cx: &mut Context<Self>) {
+        let active: Vec<Platform> = self
+            .statuses
+            .iter()
+            .filter(|(_, status)| !matches!(status, ConnectionStatus::Idle))
+            .map(|(platform, _)| *platform)
+            .collect();
+        for platform in mode.chats_to_leave(&active) {
+            self.send(ChatCommand::Leave(platform));
+        }
+        self.config.chat_mode = mode;
+        self.set_notice(NoticeSource::Channel, None);
+        self.save();
         cx.notify();
     }
 
@@ -819,6 +887,12 @@ impl AppView {
         self.save();
         self.channel_input.update(cx, |input, cx| {
             input.set_placeholder(t!("step.connect.placeholder"), window, cx)
+        });
+        self.kick_input.update(cx, |input, cx| {
+            input.set_placeholder(t!("step.connect.placeholder_kick"), window, cx)
+        });
+        self.youtube_input.update(cx, |input, cx| {
+            input.set_placeholder(t!("step.connect.placeholder_youtube"), window, cx)
         });
         self.keyword_input.update(cx, |input, cx| {
             input.set_placeholder(t!("step.keyword.placeholder"), window, cx)

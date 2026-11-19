@@ -59,6 +59,25 @@ pub enum ChatMode {
     Multi,
 }
 
+impl ChatMode {
+    /// The platforms this mode reads.
+    pub fn platforms(self) -> Vec<Platform> {
+        match self {
+            Self::Single(platform) => vec![platform],
+            Self::Multi => Platform::ALL.to_vec(),
+        }
+    }
+
+    /// Chats to leave when switching to this mode: one platform keeps only its own chat.
+    pub fn chats_to_leave(self, connected: &[Platform]) -> Vec<Platform> {
+        connected
+            .iter()
+            .copied()
+            .filter(|platform| !self.platforms().contains(platform))
+            .collect()
+    }
+}
+
 impl Default for ChatMode {
     fn default() -> Self {
         Self::Single(Platform::Twitch)
@@ -206,5 +225,19 @@ theme = \"neon\"
         assert_eq!(config.kick_channel, None);
         assert_eq!(config.youtube_source, None);
         assert_eq!(config.keyword.as_str(), "GO");
+    }
+
+    #[test]
+    fn one_platform_mode_leaves_the_other_chats_and_multistream_keeps_all() {
+        let connected = [Platform::Twitch, Platform::Kick];
+        assert_eq!(
+            ChatMode::Single(Platform::Kick).chats_to_leave(&connected),
+            [Platform::Twitch]
+        );
+        assert_eq!(
+            ChatMode::Single(Platform::YouTube).chats_to_leave(&connected),
+            [Platform::Twitch, Platform::Kick]
+        );
+        assert!(ChatMode::Multi.chats_to_leave(&connected).is_empty());
     }
 }

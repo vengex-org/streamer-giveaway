@@ -12,7 +12,9 @@ use rand::seq::IndexedRandom;
 use rust_i18n::t;
 
 use super::AppView;
+use super::palette;
 use crate::domain::chat::ChatMessage;
+use crate::domain::config::ChatMode;
 use crate::domain::giveaway::{Entrant, GiveawayState};
 use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
@@ -216,6 +218,12 @@ impl AppView {
         )
     }
 
+    /// Where the entrant came from, shown only in multistream: with one chat it says nothing.
+    pub(super) fn platform_mark(&self, entrant: &Entrant, size: f32) -> Option<Svg> {
+        (self.config.chat_mode == ChatMode::Multi)
+            .then(|| palette::platform_logo(entrant.user.platform, size))
+    }
+
     fn render_entrants(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let count = self.giveaway.entrants().len();
@@ -313,6 +321,7 @@ impl AppView {
                                     .border_b_1()
                                     .border_color(p.surface_alt)
                                     .when(weight == 0, |row| row.text_color(p.muted))
+                                    .children(this.platform_mark(entrant, 16.))
                                     .child(
                                         div()
                                             .flex_1()
@@ -456,6 +465,7 @@ impl AppView {
                     .gap_2()
                     .items_center()
                     .text_color(p.muted)
+                    .children(self.platform_mark(winner, 24.))
                     .children(self.badge_image(winner, 28.))
                     .child(i18n::role_label(role)),
             )

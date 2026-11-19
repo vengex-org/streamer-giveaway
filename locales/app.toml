@@ -750,3 +750,65 @@ sk = "neočakávaná odpoveď (%{detail})"
 en = "unexpected answer (%{detail})"
 cs = "neočekávaná odpověď (%{detail})"
 es = "respuesta inesperada (%{detail})"
+
+# Chat platforms
+
+[step.connect.mode.single]
+sk = "Jedna platforma"
+en = "One platform"
+cs = "Jedna platforma"
+es = "Una plataforma"
+
+[step.connect.mode.multi]
+sk = "Multistream"
+en = "Multistream"
+cs = "Multistream"
+es = "Multistream"
+
+[step.connect.hint_kick]
+sk = "Napíš názov kanála z adresy kick.com/ alebo vlož celý odkaz."
+en = "Type the channel name from your kick.com/ link, or paste the whole link."
+cs = "Napiš název kanálu z adresy kick.com/ nebo vlož celý odkaz."
+es = "Escribe el nombre del canal de tu enlace kick.com/ o pega el enlace completo."
+
+[step.connect.hint_youtube]
+sk = "Vlož odkaz na živý stream alebo @handle kanála. Kanál musí práve vysielať."
+en = "Paste the live stream link or the channel's @handle. The channel has to be live."
+cs = "Vlož odkaz na živý stream nebo @handle kanálu. Kanál musí právě vysílat."
+es = "Pega el enlace del directo o el @handle del canal. El canal tiene que estar en directo."
+
+[step.connect.hint_multi]
+sk = "Pripoj každý chat, kde práve vysielaš. Prihlášky zo všetkých idú do jedného žrebovania."
+en = "Connect every chat you are streaming to. Entries from all of them go into one draw."
+cs = "Připoj každý chat, kde právě vysíláš. Přihlášky ze všech jdou do jednoho losování."
+es = "Conecta cada chat en el que estés transmitiendo. Las inscripciones de todos van al mismo sorteo."
+
+[step.connect.placeholder_kick]
+sk = "názov kanála alebo odkaz"
+en = "channel name or link"
+cs = "název kanálu nebo odkaz"
+es = "nombre del canal o enlace"
+
+[step.connect.placeholder_youtube]
+sk = "odkaz na stream alebo @handle"
+en = "stream link or @handle"
+cs = "odkaz na stream nebo @handle"
+es = "enlace del directo o @handle"
+
+[header.status.multi]
+sk = "Čítam %{connected} z %{total} chatov"
+en = "Reading %{connected} of %{total} chats"
+cs = "Čtu %{connected} z %{total} chatů"
+es = "Leyendo %{connected} de %{total} chats"
+
+[error.kick_invalid]
+sk = "„%{raw}“ nie je Kick kanál. Napíš názov z adresy kick.com/<názov>."
+en = '"%{raw}" is not a Kick channel. Type the name from kick.com/<name>.'
+cs = "„%{raw}“ není Kick kanál. Napiš název z adresy kick.com/<název>."
+es = "«%{raw}» no es un canal de Kick. Escribe el nombre de kick.com/<nombre>."
+
+[error.youtube_invalid]
+sk = "„%{raw}“ nie je odkaz na YouTube stream ani @handle kanála."
+en = '"%{raw}" is not a YouTube stream link or a channel @handle.'
+cs = "„%{raw}“ není odkaz na YouTube stream ani @handle kanálu."
+es = "«%{raw}» no es un enlace de directo de YouTube ni el @handle de un canal."

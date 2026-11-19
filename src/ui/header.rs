@@ -8,6 +8,7 @@ use rust_i18n::t;
 
 use super::{AppView, Page, RunMode};
 use crate::chat::{ConnectionStatus, FailReason};
+use crate::domain::config::ChatMode;
 use crate::domain::prefs::{Language, ThemeChoice};
 use crate::i18n;
 
@@ -46,42 +47,9 @@ pub(super) fn language_options() -> Vec<LanguageOption> {
 impl AppView {
     pub(super) fn render_header(&self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
-        let (dot, status) = match &self.status {
-            ConnectionStatus::Idle => (p.muted, t!("header.status.idle")),
-            ConnectionStatus::Connecting { target, cause } => (
-                p.accent,
-                match cause {
-                    Some(cause) => t!(
-                        "header.status.connecting_cause",
-                        channel = target.label(),
-                        cause = cause
-                    ),
-                    None => t!("header.status.connecting", channel = target.label()),
-                },
-            ),
-            ConnectionStatus::Connected(target) => (
-                p.success,
-                t!("header.status.connected", channel = target.label()),
-            ),
-            ConnectionStatus::Reconnecting { target, cause } => (
-                p.danger,
-                match cause {
-                    Some(cause) => t!(
-                        "header.status.reconnecting_cause",
-                        channel = target.label(),
-                        cause = cause
-                    ),
-                    None => t!("header.status.reconnecting", channel = target.label()),
-                },
-            ),
-            ConnectionStatus::Failed { target, reason } => (
-                p.danger,
-                t!(
-                    "header.status.failed",
-                    channel = target.label(),
-                    reason = fail_reason(reason)
-                ),
-            ),
+        let (dot, status) = match self.config.chat_mode {
+            ChatMode::Single(platform) => self.status_line(self.status(platform)),
+            ChatMode::Multi => self.multi_status_line(),
         };
 
         // One button walks System, Light, Dark; its icon and tooltip say which is on.
@@ -169,13 +137,7 @@ impl AppView {
                     .items_center()
                     .min_w_0()
                     .child(div().size(px(8.)).rounded_full().bg(dot))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(p.muted)
-                            .truncate()
-                            .child(status.into_owned()),
-                    ),
+                    .child(div().text_sm().text_color(p.muted).truncate().child(status)),
             )
             .child(div().flex_1())
             .child(demo)
@@ -201,4 +163,105 @@ pub(super) fn fail_reason(reason: &FailReason) -> String {
         FailReason::Protocol(detail) => t!("status.fail.protocol", detail = detail),
     }
     .into_owned()
+}
+
+impl AppView {
+    /// Dot color and text for one platform's connection.
+    pub(super) fn status_line(&self, status: &ConnectionStatus) -> (Hsla, String) {
+        let p = self.palette;
+        let (dot, text) = match status {
+            ConnectionStatus::Idle => (p.muted, t!("header.status.idle")),
+            ConnectionStatus::Connecting { target, cause } => (
+                p.accent,
+                match cause {
+                    Some(cause) => t!(
+                        "header.status.connecting_cause",
+                        channel = target.label(),
+                        cause = cause
+                    ),
+                    None => t!("header.status.connecting", channel = target.label()),
+                },
+            ),
+            ConnectionStatus::Connected(target) => (
+                p.success,
+                t!("header.status.connected", channel = target.label()),
+            ),
+            ConnectionStatus::Reconnecting { target, cause } => (
+                p.danger,
+                match cause {
+                    Some(cause) => t!(
+                        "header.status.reconnecting_cause",
+                        channel = target.label(),
+                        cause = cause
+                    ),
+                    None => t!("header.status.reconnecting", channel = target.label()),
+                },
+            ),
+            ConnectionStatus::Failed { target, reason } => (
+                p.danger,
+                t!(
+                    "header.status.failed",
+                    channel = target.label(),
+                    reason = fail_reason(reason)
+                ),
+            ),
+        };
+        (dot, text.into_owned())
+    }
+
+    /// Multistream: how many of the started chats are read now. Red when one of them has a
+    /// problem, so it is noticed even though the details sit in step 1.
+    fn multi_status_line(&self) -> (Hsla, String) {
+        let p = self.palette;
+        let started: Vec<&ConnectionStatus> = self
+            .statuses
+            .values()
+            .filter(|status| !matches!(status, ConnectionStatus::Idle))
+            .collect();
+        if started.is_empty() {
+            return (p.muted, t!("header.status.idle").into_owned());
+        }
+        let connected = started
+            .iter()
+            .filter(|status| matches!(status, ConnectionStatus::Connected(_)))
+            .count();
+        let troubled = started.iter().any(|status| {
+            matches!(
+                status,
+                ConnectionStatus::Reconnecting { .. } | ConnectionStatus::Failed { .. }
+            )
+        });
+        let dot = if troubled {
+            p.danger
+        } else if connected == started.len() {
+            p.success
+        } else {
+            p.accent
+        };
+        let text = t!(
+            "header.status.multi",
+            connected = connected,
+            total = started.len()
+        );
+        (dot, text.into_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Not `super::*`: that brings in gpui's own `test` attribute through `gpui_kit::*`.
+    use super::{FailReason, fail_reason};
+
+    #[test]
+    fn each_fail_reason_has_its_own_text_and_protocol_keeps_the_detail() {
+        let texts = [
+            fail_reason(&FailReason::NotFound),
+            fail_reason(&FailReason::Offline),
+            fail_reason(&FailReason::Blocked),
+            fail_reason(&FailReason::Protocol("chat page: no key".into())),
+        ];
+        let distinct: std::collections::HashSet<&String> = texts.iter().collect();
+        assert_eq!(distinct.len(), texts.len(), "{texts:?}");
+        assert!(texts[3].contains("chat page: no key"), "{}", texts[3]);
+    }
 }
