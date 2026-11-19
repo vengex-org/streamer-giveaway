@@ -17,6 +17,10 @@ browser source.
   people who show up just for the giveaway don't count.
 - The window is built to be captured on stream: a large keyword and entrant count, a short reveal
   when you draw, and a winner panel with a stopwatch that stops when the winner answers in chat.
+- While entries are open, a line under the counters shows chat messages per second, new entrants
+  in the last minute and how long ago the last one came in, so you can see when entries dry up.
+  When entries close, the app saves a CSV log with the time and kind of every message (no message
+  text) for measuring the giveaway afterwards.
 - Four numbered steps with a short hint guide first-time users. The next step is highlighted, and
   a button you cannot press yet says why.
 - There is a dark and a light theme, and the app speaks English, Slovak, Czech and Spanish. Both
@@ -35,6 +39,12 @@ cargo run --release -- --demo
 Demo mode replaces Twitch with a simulated chat on `#pixelpaladin`: 6000 messages over three
 minutes from about 2400 chatters, most of them typing `GIVEME`. The drawn winner answers a few
 seconds after the draw. Demo settings are stored separately and never touch your real ones.
+
+## Download
+
+Windows builds are on the [releases page](https://github.com/vengex-org/streamer-giveaway/releases).
+The .exe is not signed, so Windows SmartScreen may warn before the first start ("More info", then
+"Run anyway").
 
 ## Build and run
 
@@ -61,7 +71,8 @@ The first build takes several minutes.
    someone else, since a winner cannot win twice. "Clear list" starts over.
 
 Settings are saved to `%APPDATA%\streamer-giveaway\config\config.toml` on Windows and to the
-platform's config folder elsewhere. Entrants are not saved.
+platform's config folder elsewhere. Giveaway logs go to `%APPDATA%\streamer-giveaway\data\logs`.
+Entrants are not saved.
 
 ## Development
 
