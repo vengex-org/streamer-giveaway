@@ -13,6 +13,7 @@ use rust_i18n::t;
 use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
 use crate::domain::chat::{ChannelLogin, Keyword};
 use crate::domain::config::Config;
+use crate::domain::eligibility::{ActiveWindow, Eligibility, TimeUnit};
 use crate::domain::giveaway::{DrawOutcome, Giveaway, GiveawayState, MessageOutcome};
 use crate::domain::matcher::MatchMode;
 use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
@@ -37,6 +38,7 @@ enum NoticeSource {
     Channel,
     Keyword,
     Weight(Role),
+    Window,
 }
 
 /// A problem to show, kept untranslated so a language switch re-renders it.
@@ -49,6 +51,7 @@ enum Notice {
     ChannelInvalid(String),
     KeywordEmpty,
     WeightInvalid(Role),
+    WindowInvalid,
 }
 
 impl Notice {
@@ -60,6 +63,7 @@ impl Notice {
             Notice::ChatRejected(cause) => t!("error.chat_rejected", cause = cause),
             Notice::ChannelInvalid(raw) => t!("error.channel_invalid", raw = raw),
             Notice::KeywordEmpty => t!("error.keyword_empty"),
+            Notice::WindowInvalid => t!("error.window_invalid"),
             Notice::WeightInvalid(role) => {
                 t!("error.weight_invalid", role = i18n::role_label(*role))
             }
@@ -77,11 +81,13 @@ pub struct AppView {
     notices: BTreeMap<NoticeSource, Notice>,
     stage: Stage,
     bonus_open: bool,
+    who_open: bool,
     os_dark: bool,
     palette: Palette,
     channel_input: Entity<InputState>,
     keyword_input: Entity<InputState>,
     weight_inputs: Vec<(Role, Entity<InputState>)>,
+    window_input: Entity<InputState>,
     entrants_scroll: UniformListScrollHandle,
     ticker: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -124,7 +130,16 @@ impl AppView {
             })
             .collect();
 
+        let window_amount = config.eligibility.active_window.amount.to_string();
+        let window_input = cx.new(|cx| InputState::new(window, cx).default_value(window_amount));
+
         let mut subscriptions = vec![
+            cx.subscribe_in(&window_input, window, |this, input, event, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let text = input.read(cx).value();
+                    this.set_window_amount(&text, cx);
+                }
+            }),
             cx.subscribe_in(&channel_input, window, Self::on_channel_input),
             cx.subscribe_in(&keyword_input, window, Self::on_keyword_input),
             cx.observe_window_appearance(window, |this, window, cx| {
@@ -159,8 +174,11 @@ impl AppView {
         })
         .detach();
 
+        let mut giveaway = Giveaway::new(config.keyword.clone(), config.mode);
+        giveaway.set_eligibility(config.eligibility);
+
         Self {
-            giveaway: Giveaway::new(config.keyword.clone(), config.mode),
+            giveaway,
             config,
             store,
             commands: bridge.commands,
@@ -171,11 +189,13 @@ impl AppView {
                 .collect(),
             stage: Stage::List,
             bonus_open: false,
+            who_open: false,
             os_dark,
             palette,
             channel_input,
             keyword_input,
             weight_inputs,
+            window_input,
             entrants_scroll: UniformListScrollHandle::new(),
             ticker: None,
             _subscriptions: subscriptions,
@@ -203,10 +223,11 @@ impl AppView {
     fn on_chat_event(&mut self, event: ChatEvent) -> bool {
         match event {
             ChatEvent::Message(msg) => {
-                let entered =
-                    self.giveaway.on_message(&msg, &self.config.weights) != MessageOutcome::Ignored;
+                let now = Instant::now();
+                let entered = self.giveaway.on_message(&msg, &self.config.weights, now)
+                    != MessageOutcome::Ignored;
                 let replied = match &mut self.stage {
-                    Stage::Winner { watch, .. } => watch.on_message(&msg, Instant::now()),
+                    Stage::Winner { watch, .. } => watch.on_message(&msg, now),
                     _ => false,
                 };
                 entered || replied
@@ -333,6 +354,34 @@ impl AppView {
             ),
         }
         cx.notify();
+    }
+
+    fn update_eligibility(
+        &mut self,
+        change: impl FnOnce(&mut Eligibility),
+        cx: &mut Context<Self>,
+    ) {
+        change(&mut self.config.eligibility);
+        self.giveaway.set_eligibility(self.config.eligibility);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_window_amount(&mut self, text: &str, cx: &mut Context<Self>) {
+        match ActiveWindow::parse_amount(text) {
+            Some(amount) => {
+                self.set_notice(NoticeSource::Window, None);
+                if amount != self.config.eligibility.active_window.amount {
+                    self.update_eligibility(|e| e.active_window.amount = amount, cx);
+                }
+            }
+            None => self.set_notice(NoticeSource::Window, Some(Notice::WindowInvalid)),
+        }
+        cx.notify();
+    }
+
+    fn set_window_unit(&mut self, unit: TimeUnit, cx: &mut Context<Self>) {
+        self.update_eligibility(|e| e.active_window.unit = unit, cx);
     }
 
     fn save(&mut self) {

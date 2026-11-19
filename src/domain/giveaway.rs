@@ -1,9 +1,11 @@
 use std::collections::HashSet;
+use std::time::Instant;
 
 use indexmap::IndexMap;
 use rand::{Rng, RngExt};
 
 use super::chat::{ChatMessage, Keyword};
+use super::eligibility::{ActivityLog, Eligibility};
 use super::matcher::{MatchMode, matches};
 use super::role::{Role, Weights, roles_from_badges};
 
@@ -56,6 +58,8 @@ pub struct Giveaway {
     entrants: IndexMap<String, Entrant>,
     /// User ids drawn since the last reset; they cannot enter again.
     winners: HashSet<String>,
+    eligibility: Eligibility,
+    activity: ActivityLog,
 }
 
 impl Giveaway {
@@ -66,12 +70,19 @@ impl Giveaway {
             state: GiveawayState::Closed,
             entrants: IndexMap::new(),
             winners: HashSet::new(),
+            eligibility: Eligibility::default(),
+            activity: ActivityLog::default(),
         }
     }
 
     pub fn set_rule(&mut self, keyword: Keyword, mode: MatchMode) {
         self.keyword = keyword;
         self.mode = mode;
+    }
+
+    /// Conditions for new entries; people already in the list are not re-checked.
+    pub fn set_eligibility(&mut self, eligibility: Eligibility) {
+        self.eligibility = eligibility;
     }
 
     pub fn state(&self) -> GiveawayState {
@@ -97,9 +108,21 @@ impl Giveaway {
         self.entrants.values()
     }
 
-    pub fn on_message(&mut self, msg: &ChatMessage, weights: &Weights) -> MessageOutcome {
+    /// Handles one chat message seen at `now`. A message that does not match the keyword counts
+    /// as chat activity; a matching one is an entry when the giveaway is open and the author
+    /// meets every condition. Authors who fail a condition are left out silently.
+    pub fn on_message(
+        &mut self,
+        msg: &ChatMessage,
+        weights: &Weights,
+        now: Instant,
+    ) -> MessageOutcome {
         if msg.is_broadcaster() {
             return MessageOutcome::Ignored;
+        }
+        let matched = matches(self.mode, &self.keyword, &msg.text);
+        if !matched {
+            self.activity.record(&msg.user_id, now);
         }
         let roles = roles_from_badges(&msg.badges);
         if let Some(entrant) = self.entrants.get_mut(&msg.user_id) {
@@ -109,8 +132,11 @@ impl Giveaway {
         }
         let entering = self.state == GiveawayState::Open
             && !self.winners.contains(&msg.user_id)
+            && matched
             && weights.effective(&roles).1 > 0
-            && matches(self.mode, &self.keyword, &msg.text);
+            && self
+                .eligibility
+                .allows(&roles, self.activity.last(&msg.user_id), now);
         if !entering {
             return MessageOutcome::Ignored;
         }
@@ -182,6 +208,8 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
+    use std::time::Instant;
+
     use super::*;
     use crate::domain::chat::Badge;
 
@@ -217,7 +245,7 @@ mod tests {
     #[test]
     fn matching_message_enters_user() {
         let mut g = open_giveaway();
-        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
         assert_eq!(outcome, MessageOutcome::Entered);
         assert_eq!(ids(&g), ["1"]);
     }
@@ -225,7 +253,7 @@ mod tests {
     #[test]
     fn non_matching_message_is_ignored() {
         let mut g = open_giveaway();
-        let outcome = g.on_message(&msg("1", "nope", &[]), &Weights::default());
+        let outcome = g.on_message(&msg("1", "nope", &[]), &Weights::default(), Instant::now());
         assert_eq!(outcome, MessageOutcome::Ignored);
         assert_eq!(g.entrants().len(), 0);
     }
@@ -233,8 +261,12 @@ mod tests {
     #[test]
     fn second_matching_message_from_same_user_is_not_a_second_entry() {
         let mut g = open_giveaway();
-        g.on_message(&msg("1", "YEP", &[]), &Weights::default());
-        let outcome = g.on_message(&msg("1", "YEP YEP", &[]), &Weights::default());
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
+        let outcome = g.on_message(
+            &msg("1", "YEP YEP", &[]),
+            &Weights::default(),
+            Instant::now(),
+        );
         assert_eq!(outcome, MessageOutcome::AlreadyEntered);
         assert_eq!(ids(&g), ["1"]);
     }
@@ -243,7 +275,7 @@ mod tests {
     fn closed_giveaway_ignores_matching_messages() {
         let mut g = open_giveaway();
         g.close();
-        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
         assert_eq!(outcome, MessageOutcome::Ignored);
         assert_eq!(g.entrants().len(), 0);
     }
@@ -251,7 +283,7 @@ mod tests {
     #[test]
     fn reset_clears_entrants() {
         let mut g = open_giveaway();
-        g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
         g.reset();
         assert_eq!(g.entrants().len(), 0);
     }
@@ -262,6 +294,7 @@ mod tests {
         let outcome = g.on_message(
             &msg("1", "YEP", &[("broadcaster", "1"), ("subscriber", "0")]),
             &Weights::default(),
+            Instant::now(),
         );
         assert_eq!(outcome, MessageOutcome::Ignored);
         assert_eq!(g.entrants().len(), 0);
@@ -274,7 +307,7 @@ mod tests {
             pleb: 0,
             ..Weights::default()
         };
-        let outcome = g.on_message(&msg("1", "YEP", &[]), &weights);
+        let outcome = g.on_message(&msg("1", "YEP", &[]), &weights, Instant::now());
         assert_eq!(outcome, MessageOutcome::Ignored);
         assert_eq!(g.entrants().len(), 0);
     }
@@ -282,10 +315,11 @@ mod tests {
     #[test]
     fn later_message_updates_roles_even_without_keyword() {
         let mut g = open_giveaway();
-        g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
         g.on_message(
             &msg("1", "just subbed", &[("subscriber", "3000")]),
             &Weights::default(),
+            Instant::now(),
         );
         let entrant = g.entrants().next().unwrap();
         assert_eq!(entrant.roles, vec![Role::SubT3]);
@@ -294,8 +328,12 @@ mod tests {
     #[test]
     fn entrant_dropped_to_weight_zero_stays_listed_but_is_not_drawn() {
         let mut g = open_giveaway();
-        g.on_message(&msg("1", "YEP", &[]), &Weights::default());
-        g.on_message(&msg("2", "YEP", &[("vip", "1")]), &Weights::default());
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
+        g.on_message(
+            &msg("2", "YEP", &[("vip", "1")]),
+            &Weights::default(),
+            Instant::now(),
+        );
         let weights = Weights {
             pleb: 0,
             ..Weights::default()
@@ -323,8 +361,8 @@ mod tests {
     #[test]
     fn draw_removes_winner_so_redraw_picks_someone_else() {
         let mut g = open_giveaway();
-        g.on_message(&msg("1", "YEP", &[]), &Weights::default());
-        g.on_message(&msg("2", "YEP", &[]), &Weights::default());
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
+        g.on_message(&msg("2", "YEP", &[]), &Weights::default(), Instant::now());
         let mut rng = StdRng::seed_from_u64(3);
         let DrawOutcome::Winner(first) = g.draw(&Weights::default(), &mut rng) else {
             panic!("expected a winner");
@@ -347,8 +385,12 @@ mod tests {
             ..Weights::default()
         };
         let mut pool = open_giveaway();
-        pool.on_message(&msg("pleb", "YEP", &[]), &weights);
-        pool.on_message(&msg("sub", "YEP", &[("subscriber", "1")]), &weights);
+        pool.on_message(&msg("pleb", "YEP", &[]), &weights, Instant::now());
+        pool.on_message(
+            &msg("sub", "YEP", &[("subscriber", "1")]),
+            &weights,
+            Instant::now(),
+        );
         let mut rng = StdRng::seed_from_u64(42);
         let rounds = 10_000;
         let sub_wins = (0..rounds)
@@ -367,17 +409,17 @@ mod tests {
     #[test]
     fn winner_cannot_enter_again_until_reset() {
         let mut g = open_giveaway();
-        g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
         let mut rng = StdRng::seed_from_u64(5);
         assert!(matches!(
             g.draw(&Weights::default(), &mut rng),
             DrawOutcome::Winner(_)
         ));
-        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
         assert_eq!(outcome, MessageOutcome::Ignored);
         g.reset();
         g.open();
-        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        let outcome = g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
         assert_eq!(outcome, MessageOutcome::Entered);
     }
 
@@ -387,11 +429,11 @@ mod tests {
         g.set_rule(Keyword::parse("!join").unwrap(), MatchMode::Exact);
         let weights = Weights::default();
         assert_eq!(
-            g.on_message(&msg("1", "YEP", &[]), &weights),
+            g.on_message(&msg("1", "YEP", &[]), &weights, Instant::now()),
             MessageOutcome::Ignored
         );
         assert_eq!(
-            g.on_message(&msg("2", "!JOIN", &[]), &weights),
+            g.on_message(&msg("2", "!JOIN", &[]), &weights, Instant::now()),
             MessageOutcome::Entered
         );
     }
@@ -399,14 +441,78 @@ mod tests {
     #[test]
     fn draw_closes_open_entries() {
         let mut g = open_giveaway();
-        g.on_message(&msg("1", "YEP", &[]), &Weights::default());
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
         let mut rng = StdRng::seed_from_u64(11);
         g.draw(&Weights::default(), &mut rng);
         assert_eq!(g.state(), GiveawayState::Closed);
         assert_eq!(
-            g.on_message(&msg("2", "YEP", &[]), &Weights::default()),
+            g.on_message(&msg("2", "YEP", &[]), &Weights::default(), Instant::now()),
             MessageOutcome::Ignored
         );
+    }
+
+    #[test]
+    fn subs_only_leaves_out_non_subs_silently() {
+        let mut g = open_giveaway();
+        g.set_eligibility(Eligibility {
+            subs_only: true,
+            ..Eligibility::default()
+        });
+        let now = Instant::now();
+        let weights = Weights::default();
+        assert_eq!(
+            g.on_message(&msg("1", "YEP", &[]), &weights, now),
+            MessageOutcome::Ignored
+        );
+        assert_eq!(
+            g.on_message(&msg("2", "YEP", &[("founder", "0")]), &weights, now),
+            MessageOutcome::Entered
+        );
+        assert_eq!(ids(&g), ["2"]);
+    }
+
+    #[test]
+    fn activity_condition_needs_a_non_keyword_message_inside_the_window() {
+        use std::time::Duration;
+        let mut g = open_giveaway();
+        g.set_eligibility(Eligibility {
+            require_activity: true,
+            ..Eligibility::default()
+        });
+        let weights = Weights::default();
+        let start = Instant::now();
+        let minutes = |n: u64| start + Duration::from_secs(60 * n);
+
+        g.on_message(&msg("1", "hello chat", &[]), &weights, start);
+        g.on_message(&msg("2", "hi", &[]), &weights, start);
+        g.on_message(&msg("3", "YEP", &[]), &weights, start);
+
+        assert_eq!(
+            g.on_message(&msg("1", "YEP", &[]), &weights, minutes(5)),
+            MessageOutcome::Entered
+        );
+        assert_eq!(
+            g.on_message(&msg("2", "YEP", &[]), &weights, minutes(11)),
+            MessageOutcome::Ignored
+        );
+        // An earlier keyword message is not activity.
+        assert_eq!(
+            g.on_message(&msg("3", "YEP", &[]), &weights, minutes(1)),
+            MessageOutcome::Ignored
+        );
+        assert_eq!(ids(&g), ["1"]);
+    }
+
+    #[test]
+    fn new_conditions_do_not_remove_people_already_listed() {
+        let mut g = open_giveaway();
+        let now = Instant::now();
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default(), now);
+        g.set_eligibility(Eligibility {
+            subs_only: true,
+            ..Eligibility::default()
+        });
+        assert_eq!(ids(&g), ["1"]);
     }
 
     #[test]
@@ -416,9 +522,9 @@ mod tests {
             ..Weights::default()
         };
         let mut g = open_giveaway();
-        g.on_message(&msg("1", "YEP", &[]), &weights);
-        g.on_message(&msg("2", "YEP", &[]), &weights);
-        g.on_message(&msg("3", "YEP", &[]), &weights);
+        g.on_message(&msg("1", "YEP", &[]), &weights, Instant::now());
+        g.on_message(&msg("2", "YEP", &[]), &weights, Instant::now());
+        g.on_message(&msg("3", "YEP", &[]), &weights, Instant::now());
         let mut rng = StdRng::seed_from_u64(9);
         assert!(matches!(g.draw(&weights, &mut rng), DrawOutcome::Winner(_)));
     }
@@ -427,13 +533,14 @@ mod tests {
     fn counts_by_role_counts_drawable_entrants_by_effective_role() {
         let mut g = open_giveaway();
         let weights = Weights::default();
-        g.on_message(&msg("1", "YEP", &[]), &weights);
-        g.on_message(&msg("2", "YEP", &[]), &weights);
+        g.on_message(&msg("1", "YEP", &[]), &weights, Instant::now());
+        g.on_message(&msg("2", "YEP", &[]), &weights, Instant::now());
         g.on_message(
             &msg("3", "YEP", &[("subscriber", "3001"), ("moderator", "1")]),
             &weights,
+            Instant::now(),
         );
-        g.on_message(&msg("4", "YEP", &[("vip", "1")]), &weights);
+        g.on_message(&msg("4", "YEP", &[("vip", "1")]), &weights, Instant::now());
         let weights = Weights { vip: 0, ..weights };
         let counts = g.counts_by_role(&weights);
         assert_eq!(

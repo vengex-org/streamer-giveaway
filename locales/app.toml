@@ -426,3 +426,71 @@ sk = "Problém s nastaveniami: %{cause}"
 en = "Settings problem: %{cause}"
 cs = "Problém s nastavením: %{cause}"
 es = "Problema con la configuración: %{cause}"
+
+# Who can enter (eligibility)
+
+[step.keyword.who_show]
+sk = "Kto sa môže prihlásiť ▸"
+en = "Who can enter ▸"
+cs = "Kdo se může přihlásit ▸"
+es = "Quién puede participar ▸"
+
+[step.keyword.who_hide]
+sk = "Kto sa môže prihlásiť ▾"
+en = "Who can enter ▾"
+cs = "Kdo se může přihlásit ▾"
+es = "Quién puede participar ▾"
+
+[who.everyone]
+sk = "Prihlásiť sa môže každý."
+en = "Everyone can enter."
+cs = "Přihlásit se může každý."
+es = "Cualquiera puede participar."
+
+[who.restricted]
+sk = "Prihlásiť sa môžu len: %{rules}."
+en = "Only: %{rules}."
+cs = "Přihlásit se můžou jen: %{rules}."
+es = "Solo: %{rules}."
+
+[who.subs]
+sk = "len subscriberi"
+en = "subscribers only"
+cs = "jen subscribeři"
+es = "solo suscriptores"
+
+[who.active]
+sk = "len aktívni v chate za posledných"
+en = "only people active in chat in the last"
+cs = "jen aktivní v chatu za posledních"
+es = "solo activos en el chat en los últimos"
+
+[who.active_summary]
+sk = "aktívni v chate za posledných %{amount} %{unit}"
+en = "active in chat in the last %{amount} %{unit}"
+cs = "aktivní v chatu za posledních %{amount} %{unit}"
+es = "activos en el chat en los últimos %{amount} %{unit}"
+
+[who.minutes]
+sk = "min"
+en = "min"
+cs = "min"
+es = "min"
+
+[who.hours]
+sk = "h"
+en = "h"
+cs = "h"
+es = "h"
+
+[who.hint]
+sk = "Kto podmienku nesplní, do žrebovania sa potichu nedostane. Aktivita sa ráta od chvíle, keď sa appka pripojila, a kľúčové slovo sa do nej neráta."
+en = "Anyone who misses a condition is quietly left out. Activity counts from when the app connected, and typing the keyword does not count."
+cs = "Kdo podmínku nesplní, do losování se potichu nedostane. Aktivita se počítá od chvíle, kdy se aplikace připojila, a klíčové slovo se do ní nepočítá."
+es = "Quien no cumpla una condición queda fuera sin aviso. La actividad cuenta desde que la app se conectó y escribir la palabra clave no cuenta."
+
+[error.window_invalid]
+sk = "Čas aktivity: zadaj celé číslo od 1."
+en = "Activity time: enter a whole number from 1."
+cs = "Čas aktivity: zadej celé číslo od 1."
+es = "Tiempo de actividad: escribe un número entero desde 1."

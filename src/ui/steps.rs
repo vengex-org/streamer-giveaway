@@ -1,4 +1,5 @@
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -7,6 +8,7 @@ use rust_i18n::t;
 
 use super::{AppView, Stage};
 use crate::chat::ConnectionStatus;
+use crate::domain::eligibility::TimeUnit;
 use crate::domain::giveaway::GiveawayState;
 use crate::domain::matcher::MatchMode;
 use crate::i18n;
@@ -231,6 +233,11 @@ impl AppView {
         } else {
             t!("step.keyword.bonus_show")
         };
+        let who_label = if self.who_open {
+            t!("step.keyword.who_hide")
+        } else {
+            t!("step.keyword.who_show")
+        };
 
         v_flex()
             .gap_2()
@@ -243,18 +250,38 @@ impl AppView {
                     .child(example.into_owned()),
             )
             .child(
-                h_flex().child(
-                    Button::new("bonus")
-                        .xsmall()
-                        .ghost()
-                        .label(bonus_label.into_owned())
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.bonus_open = !this.bonus_open;
-                            cx.notify();
-                        })),
-                ),
+                h_flex()
+                    .gap_1()
+                    .flex_wrap()
+                    .child(
+                        Button::new("bonus")
+                            .xsmall()
+                            .ghost()
+                            .label(bonus_label.into_owned())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.bonus_open = !this.bonus_open;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("who")
+                            .xsmall()
+                            .ghost()
+                            .label(who_label.into_owned())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.who_open = !this.who_open;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(p.muted)
+                    .child(self.who_summary()),
             )
             .when(self.bonus_open, |col| col.child(self.render_bonus()))
+            .when(self.who_open, |col| col.child(self.render_who(cx)))
     }
 
     fn render_bonus(&self) -> impl IntoElement {
@@ -284,6 +311,81 @@ impl AppView {
                     .child(t!("step.keyword.bonus_hint").into_owned()),
             )
             .child(h_flex().flex_wrap().gap_2().children(fields))
+    }
+
+    fn who_summary(&self) -> String {
+        let e = self.config.eligibility;
+        let mut rules = Vec::new();
+        if e.subs_only {
+            rules.push(t!("who.subs").into_owned());
+        }
+        if e.require_activity {
+            rules.push(
+                t!(
+                    "who.active_summary",
+                    amount = e.active_window.amount,
+                    unit = unit_label(e.active_window.unit)
+                )
+                .into_owned(),
+            );
+        }
+        if rules.is_empty() {
+            t!("who.everyone").into_owned()
+        } else {
+            t!("who.restricted", rules = rules.join(", ")).into_owned()
+        }
+    }
+
+    fn render_who(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = self.palette;
+        let e = self.config.eligibility;
+        let units = [TimeUnit::Minutes, TimeUnit::Hours].map(|unit| {
+            let selected = e.active_window.unit == unit;
+            Button::new(SharedString::from(format!("unit-{unit:?}")))
+                .xsmall()
+                .when(selected, |b| b.primary())
+                .when(!selected, |b| b.outline())
+                .label(unit_label(unit))
+                .toggled(selected)
+                .on_click(cx.listener(move |this, _, _, cx| this.set_window_unit(unit, cx)))
+        });
+        v_flex()
+            .gap_2()
+            .p_3()
+            .rounded_md()
+            .bg(p.surface_alt)
+            .child(
+                Checkbox::new("subs-only")
+                    .checked(e.subs_only)
+                    .label(t!("who.subs").into_owned())
+                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                        let checked = *checked;
+                        this.update_eligibility(|e| e.subs_only = checked, cx)
+                    })),
+            )
+            .child(
+                Checkbox::new("require-activity")
+                    .checked(e.require_activity)
+                    .label(t!("who.active").into_owned())
+                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                        let checked = *checked;
+                        this.update_eligibility(|e| e.require_activity = checked, cx)
+                    })),
+            )
+            .child(
+                h_flex()
+                    .gap_1()
+                    .pl_6()
+                    .items_center()
+                    .child(Input::new(&self.window_input).small().w(px(64.)))
+                    .children(units),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(p.muted)
+                    .child(t!("who.hint").into_owned()),
+            )
     }
 
     fn render_entries(
@@ -369,6 +471,14 @@ impl AppView {
                     ),
             )
     }
+}
+
+fn unit_label(unit: TimeUnit) -> String {
+    match unit {
+        TimeUnit::Minutes => t!("who.minutes"),
+        TimeUnit::Hours => t!("who.hours"),
+    }
+    .into_owned()
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::chat::{ChannelLogin, Keyword};
+use super::eligibility::Eligibility;
 use super::matcher::MatchMode;
 use super::prefs::{Language, ThemeChoice, lenient};
 use super::role::Weights;
@@ -13,6 +14,7 @@ pub struct Config {
     pub keyword: Keyword,
     pub mode: MatchMode,
     pub weights: Weights,
+    pub eligibility: Eligibility,
     /// None = follow the OS language.
     #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub language: Option<Language>,
@@ -28,6 +30,7 @@ impl Default for Config {
             keyword: Keyword::parse("YEP").expect("default keyword is not empty"),
             mode: MatchMode::default(),
             weights: Weights::default(),
+            eligibility: Eligibility::default(),
             language: None,
             theme: None,
         }
@@ -85,6 +88,28 @@ theme = \"neon\"
         assert_eq!(config.language, None);
         assert_eq!(config.theme, None);
         assert_eq!(config.keyword.as_str(), "!join");
+    }
+
+    #[test]
+    fn eligibility_round_trips_and_defaults_to_off() {
+        use crate::domain::eligibility::{ActiveWindow, TimeUnit};
+        let config = Config {
+            eligibility: Eligibility {
+                subs_only: true,
+                require_activity: true,
+                active_window: ActiveWindow {
+                    amount: 2,
+                    unit: TimeUnit::Hours,
+                },
+            },
+            ..Config::default()
+        };
+        let text = config.to_toml().unwrap();
+        assert_eq!(Config::from_toml(&text).unwrap(), config);
+        assert_eq!(
+            Config::from_toml("").unwrap().eligibility,
+            Eligibility::default()
+        );
     }
 
     #[test]
