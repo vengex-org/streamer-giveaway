@@ -97,7 +97,7 @@ fn main() {
                 }),
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    size(px(1180.), px(760.)),
+                    window_size(cx),
                     cx,
                 ))),
                 ..Default::default()
@@ -107,6 +107,26 @@ fn main() {
             })
             .expect("failed to open the main window");
         });
+}
+
+/// Big enough to show all five steps with three chats connected and entries open.
+const WINDOW_SIZE: Size<Pixels> = Size {
+    width: px(1400.),
+    height: px(1100.),
+};
+/// Room kept free around the window on a screen too small for [`WINDOW_SIZE`].
+const SCREEN_MARGIN: Pixels = px(40.);
+
+/// [`WINDOW_SIZE`], shrunk to the primary screen's work area (the screen minus the taskbar).
+fn window_size(cx: &App) -> Size<Pixels> {
+    let Some(display) = cx.primary_display() else {
+        return WINDOW_SIZE;
+    };
+    let screen = display.visible_bounds().size;
+    size(
+        WINDOW_SIZE.width.min(screen.width - SCREEN_MARGIN * 2.),
+        WINDOW_SIZE.height.min(screen.height - SCREEN_MARGIN * 2.),
+    )
 }
 
 /// Reads `--demo-viewers=N` and its companions; `None` when no viewer count is given.
