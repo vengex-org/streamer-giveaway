@@ -24,6 +24,10 @@ use crate::i18n;
 pub(super) const TICK: Duration = Duration::from_millis(100);
 /// How long the names flash before the winner shows.
 const REVEAL: Duration = Duration::from_secs(2);
+/// Right padding of the entrant table: the usual 20 px plus the 16 px the always-shown
+/// scrollbar paints over the rows, so the ticket column stays clear of it and lines up with
+/// its header.
+const ROW_RIGHT_PADDING: Pixels = px(20. + 16.);
 /// Names shown during the reveal, one per tick.
 pub(super) const REVEAL_FRAMES: usize = (REVEAL.as_millis() / TICK.as_millis()) as usize;
 
@@ -248,7 +252,8 @@ impl AppView {
                     )
                 }));
         let header = h_flex()
-            .px_5()
+            .pl_5()
+            .pr(ROW_RIGHT_PADDING)
             .py_2p5()
             .gap_2()
             .text_xs()
@@ -315,7 +320,8 @@ impl AppView {
                                 let (role, weight) = entrant.effective(&this.config.weights);
                                 h_flex()
                                     .w_full()
-                                    .px_5()
+                                    .pl_5()
+                                    .pr(ROW_RIGHT_PADDING)
                                     .py_2()
                                     .gap_2()
                                     .border_b_1()
