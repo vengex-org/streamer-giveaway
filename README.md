@@ -17,9 +17,10 @@ browser source.
   people who show up just for the giveaway don't count.
 - The window is built to be captured on stream: a large keyword and entrant count, a short reveal
   when you draw, and a winner panel with a stopwatch that stops when the winner answers in chat.
-- Four numbered steps with a short hint guide first-time users, and the next step is highlighted.
+- Four numbered steps with a short hint guide first-time users. The next step is highlighted, and
+  a button you cannot press yet says why.
 - There is a dark and a light theme, and the app speaks English, Slovak, Czech and Spanish. Both
-  follow your system settings until you pick one.
+  follow your system settings until you pick one, and "Auto" or "System" goes back to that.
 
 | Entries coming in | Winner answered | Entry conditions, light theme |
 |---|---|---|
