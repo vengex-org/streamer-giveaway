@@ -13,13 +13,13 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ChatTarget, ConnectionStatus};
-use crate::domain::badges::{self, BadgeUrl};
+use crate::domain::badges::{self, BadgeImages};
 use crate::domain::chat::{ChannelLogin, Keyword};
 use crate::domain::config::Config;
 use crate::domain::eligibility::{ActiveWindow, Eligibility, TimeUnit};
 use crate::domain::giveaway::{DrawOutcome, Giveaway, GiveawayState, MessageOutcome};
 use crate::domain::matcher::MatchMode;
-use crate::domain::platform::{Platform, UserKey};
+use crate::domain::platform::{KickChannel, Platform, UserKey};
 use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
 use crate::domain::role::{Role, Weights};
 use crate::domain::session_log::{self, LogKind, SessionLog};
@@ -140,8 +140,9 @@ pub struct AppView {
     /// The query `search_hits` were computed for.
     search_hits_query: Option<String>,
     /// Subscriber badge version to picture URL for the connected channel; empty until loaded.
-    badge_images: HashMap<String, BadgeUrl>,
-    badge_fetch: Option<Task<()>>,
+    badge_images: BadgeImages,
+    /// Badge list downloads in flight, one per platform.
+    badge_fetch: HashMap<Platform, Task<()>>,
     /// "Clear history" was pressed once and waits for the confirming second press.
     confirm_clear_history: bool,
     stats_ticker: Option<Task<()>>,
@@ -288,8 +289,8 @@ impl AppView {
             search_input,
             search_hits: None,
             search_hits_query: None,
-            badge_images: HashMap::new(),
-            badge_fetch: None,
+            badge_images: BadgeImages::default(),
+            badge_fetch: HashMap::new(),
             confirm_clear_history: false,
             stats_ticker: None,
             _subscriptions: subscriptions,
@@ -348,6 +349,13 @@ impl AppView {
                 }
                 self.status = status;
                 true
+            }
+            ChatEvent::Status(
+                Platform::Kick,
+                ConnectionStatus::Connected(ChatTarget::Kick(channel)),
+            ) => {
+                self.load_kick_badges(&channel, cx);
+                false
             }
             ChatEvent::Status(Platform::Kick | Platform::YouTube, _) => false,
             ChatEvent::Rejected(reason) => {
@@ -644,33 +652,61 @@ impl AppView {
     /// Fetches the channel's subscriber badge pictures. A failure only means rows show the role
     /// name without a picture, so it is logged, not shown.
     fn load_badges(&mut self, channel: ChannelLogin, cx: &mut Context<Self>) {
-        self.badge_images.clear();
+        self.load_badge_list(
+            Platform::Twitch,
+            badges::channel_badges_url(&channel),
+            |images, json| badges::subscriber_badge_images(json).map(|i| images.set_twitch(i)),
+            cx,
+        );
+    }
+
+    fn load_kick_badges(&mut self, channel: &KickChannel, cx: &mut Context<Self>) {
+        self.load_badge_list(
+            Platform::Kick,
+            crate::chat::kick_channel_url(channel),
+            |images, json| badges::kick_subscriber_badges(json).map(|t| images.set_kick(t)),
+            cx,
+        );
+    }
+
+    /// Downloads a channel's badge list and stores it with `apply`. A failure only means rows
+    /// show the role name without a picture, so it is logged, not shown.
+    fn load_badge_list(
+        &mut self,
+        platform: Platform,
+        url: String,
+        apply: fn(&mut BadgeImages, &str) -> Result<(), serde_json::Error>,
+        cx: &mut Context<Self>,
+    ) {
+        self.badge_images.clear(platform);
         let client = cx.http_client();
-        let url = badges::channel_badges_url(&channel);
-        self.badge_fetch = Some(cx.spawn(
-            async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-                let images = async {
-                    use futures::AsyncReadExt as _;
-                    let mut response = client
-                        .get(&url, http_client::AsyncBody::empty(), true)
-                        .await?;
-                    anyhow::ensure!(response.status().is_success(), "HTTP {}", response.status());
-                    let mut body = String::new();
-                    response.body_mut().read_to_string(&mut body).await?;
-                    Ok::<_, anyhow::Error>(badges::subscriber_badge_images(&body)?)
-                }
-                .await;
-                match images {
-                    Ok(images) => {
-                        let _ = this.update(cx, |view, cx| {
-                            view.badge_images = images;
-                            cx.notify();
-                        });
-                    }
-                    Err(err) => tracing::warn!("channel badges not loaded: {err:#}"),
-                }
-            },
-        ));
+        let task = cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let body = async {
+                use futures::AsyncReadExt as _;
+                let mut response = client
+                    .get(&url, http_client::AsyncBody::empty(), true)
+                    .await?;
+                anyhow::ensure!(response.status().is_success(), "HTTP {}", response.status());
+                let mut body = String::new();
+                response.body_mut().read_to_string(&mut body).await?;
+                Ok::<_, anyhow::Error>(body)
+            }
+            .await;
+            let applied = match body {
+                Ok(body) => this
+                    .update(cx, |view, cx| {
+                        let applied = apply(&mut view.badge_images, &body);
+                        cx.notify();
+                        applied
+                    })
+                    .and_then(|applied| applied.map_err(anyhow::Error::from)),
+                Err(err) => Err(err),
+            };
+            if let Err(err) = applied {
+                tracing::warn!(%platform, "channel badges not loaded: {err:#}");
+            }
+        });
+        self.badge_fetch.insert(platform, task);
     }
 
     /// Starts this app again in demo mode, as a second window with its own settings, so the

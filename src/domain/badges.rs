@@ -1,12 +1,15 @@
-//! A channel's own subscriber badge images. Chat only sends the badge version, such as
-//! `subscriber/3012`; the pictures come from the community badge list at api.ivr.fi, which
-//! needs no login. Without it the app shows the role name alone.
+//! A channel's own subscriber badge images. Twitch chat only sends the badge version, such as
+//! `subscriber/3012`, and the pictures come from the community badge list at api.ivr.fi, which
+//! needs no login. Kick chat sends the months subscribed, and the channel API lists a picture per
+//! month tier. YouTube sends the member picture with each message. Without a picture the app
+//! shows the role name alone.
 
 use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use super::chat::ChannelLogin;
+use super::chat::{ChannelLogin, SubBadge};
+use super::platform::Platform;
 
 /// Badge list of one channel.
 pub fn channel_badges_url(channel: &ChannelLogin) -> String {
@@ -64,6 +67,78 @@ pub fn subscriber_badge_images(json: &str) -> Result<HashMap<String, BadgeUrl>, 
         .flat_map(|set| set.versions)
         .filter_map(|version| Some((version.id, BadgeUrl::parse(&version.image_url_2x)?)))
         .collect())
+}
+
+#[derive(Deserialize)]
+struct KickChannelBadges {
+    #[serde(default)]
+    subscriber_badges: Vec<KickTier>,
+}
+
+#[derive(Deserialize)]
+struct KickTier {
+    months: u32,
+    badge_image: KickImage,
+}
+
+#[derive(Deserialize)]
+struct KickImage {
+    src: String,
+}
+
+/// Kick sub badge tiers from the channel API's answer, by months, keeping only allowed hosts.
+pub fn kick_subscriber_badges(json: &str) -> Result<Vec<(u32, BadgeUrl)>, serde_json::Error> {
+    let channel: KickChannelBadges = serde_json::from_str(json)?;
+    let mut tiers: Vec<(u32, BadgeUrl)> = channel
+        .subscriber_badges
+        .into_iter()
+        .filter_map(|tier| Some((tier.months, BadgeUrl::parse(&tier.badge_image.src)?)))
+        .collect();
+    tiers.sort_by_key(|(months, _)| *months);
+    Ok(tiers)
+}
+
+/// The tier a sub of `months` has reached: the one with the most months not above it.
+fn kick_tier(months: u32, tiers: &[(u32, BadgeUrl)]) -> Option<&BadgeUrl> {
+    tiers
+        .iter()
+        .rev()
+        .find(|(tier_months, _)| *tier_months <= months)
+        .map(|(_, url)| url)
+}
+
+/// Badge pictures of the connected channels, per platform.
+#[derive(Debug, Clone, Default)]
+pub struct BadgeImages {
+    twitch: HashMap<String, BadgeUrl>,
+    kick: Vec<(u32, BadgeUrl)>,
+}
+
+impl BadgeImages {
+    pub fn set_twitch(&mut self, images: HashMap<String, BadgeUrl>) {
+        self.twitch = images;
+    }
+
+    pub fn set_kick(&mut self, tiers: Vec<(u32, BadgeUrl)>) {
+        self.kick = tiers;
+    }
+
+    /// Forgets a platform's pictures when it connects to another channel.
+    pub fn clear(&mut self, platform: Platform) {
+        match platform {
+            Platform::Twitch => self.twitch.clear(),
+            Platform::Kick => self.kick.clear(),
+            Platform::YouTube => {}
+        }
+    }
+
+    pub fn picture<'a>(&'a self, badge: &'a SubBadge) -> Option<&'a BadgeUrl> {
+        match badge {
+            SubBadge::Twitch(version) => self.twitch.get(version),
+            SubBadge::Kick(months) => kick_tier(*months, &self.kick),
+            SubBadge::YouTube(url) => Some(url),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -129,5 +204,59 @@ mod tests {
     fn the_url_names_the_channel() {
         let channel = ChannelLogin::parse("xqc").unwrap();
         assert!(channel_badges_url(&channel).ends_with("?login=xqc"));
+    }
+
+    const KICK_CHANNEL: &str = include_str!("../../tests/fixtures/kick/channel.json");
+
+    fn url(raw: &str) -> BadgeUrl {
+        BadgeUrl::parse(raw).unwrap()
+    }
+
+    #[test]
+    fn kick_tiers_come_sorted_from_the_channel_answer() {
+        let tiers = kick_subscriber_badges(KICK_CHANNEL).unwrap();
+        let months: Vec<u32> = tiers.iter().map(|(m, _)| *m).collect();
+        assert!(!months.is_empty() && months.is_sorted(), "{months:?}");
+        assert!(
+            tiers
+                .iter()
+                .all(|(_, u)| u.as_str().starts_with("https://files.kick.com/"))
+        );
+        assert!(kick_subscriber_badges("{}").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_kick_sub_gets_the_highest_tier_reached() {
+        let tiers = vec![
+            (1, url("https://files.kick.com/b/1")),
+            (3, url("https://files.kick.com/b/3")),
+            (6, url("https://files.kick.com/b/6")),
+        ];
+        let tier_of = |months| kick_tier(months, &tiers).map(BadgeUrl::as_str);
+        assert_eq!(tier_of(1), Some("https://files.kick.com/b/1"));
+        assert_eq!(tier_of(5), Some("https://files.kick.com/b/3"));
+        assert_eq!(tier_of(40), Some("https://files.kick.com/b/6"));
+        assert_eq!(tier_of(0), None);
+        assert_eq!(kick_tier(4, &[]), None);
+    }
+
+    #[test]
+    fn pictures_are_looked_up_per_platform() {
+        let mut images = BadgeImages::default();
+        images.set_twitch(HashMap::from([(
+            "3012".to_owned(),
+            url("https://static-cdn.jtvnw.net/b/2"),
+        )]));
+        images.set_kick(vec![(2, url("https://files.kick.com/b/2"))]);
+        let member = url("https://yt3.ggpht.com/m=s32");
+        assert!(images.picture(&SubBadge::Twitch("3012".into())).is_some());
+        assert!(images.picture(&SubBadge::Twitch("0".into())).is_none());
+        assert!(images.picture(&SubBadge::Kick(2)).is_some());
+        assert_eq!(
+            images.picture(&SubBadge::YouTube(member.clone())),
+            Some(&member)
+        );
+        images.clear(Platform::Kick);
+        assert!(images.picture(&SubBadge::Kick(2)).is_none());
     }
 }

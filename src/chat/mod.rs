@@ -14,6 +14,7 @@ use tracing_subscriber::layer::{Context, Layer};
 use crate::domain::chat::{ChannelLogin, ChatMessage};
 use crate::domain::platform::{KickChannel, Platform, UserKey, YouTubeSource};
 
+pub use kick::channel_url as kick_channel_url;
 pub use twitch::to_chat_message;
 
 /// Browser-like client identity for Kick and YouTube, whose bot filters turn away requests that

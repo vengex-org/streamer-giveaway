@@ -13,7 +13,6 @@ use rust_i18n::t;
 
 use super::AppView;
 use crate::domain::chat::ChatMessage;
-use crate::domain::chat::SubBadge;
 use crate::domain::giveaway::{Entrant, GiveawayState};
 use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
@@ -209,10 +208,7 @@ impl AppView {
 
     /// The channel's badge picture for this entrant's sub badge, once the badge list loaded.
     pub(super) fn badge_image(&self, entrant: &Entrant, size: f32) -> Option<Img> {
-        let url = match entrant.sub_badge.as_ref()? {
-            SubBadge::Twitch(version) => self.badge_images.get(version)?,
-            SubBadge::Kick(_) | SubBadge::YouTube(_) => return None,
-        };
+        let url = self.badge_images.picture(entrant.sub_badge.as_ref()?)?;
         Some(
             img(SharedUri::from(url.as_str().to_owned()))
                 .size(px(size))
