@@ -13,7 +13,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
-use crate::domain::badges;
+use crate::domain::badges::{self, BadgeUrl};
 use crate::domain::chat::{ChannelLogin, Keyword};
 use crate::domain::config::Config;
 use crate::domain::eligibility::{ActiveWindow, Eligibility, TimeUnit};
@@ -139,7 +139,7 @@ pub struct AppView {
     /// The query `search_hits` were computed for.
     search_hits_query: Option<String>,
     /// Subscriber badge version to picture URL for the connected channel; empty until loaded.
-    badge_images: HashMap<String, String>,
+    badge_images: HashMap<String, BadgeUrl>,
     badge_fetch: Option<Task<()>>,
     /// "Clear history" was pressed once and waits for the confirming second press.
     confirm_clear_history: bool,
@@ -313,7 +313,7 @@ impl AppView {
         match event {
             ChatEvent::Message(msg) => {
                 let now = Instant::now();
-                let matched = self.giveaway.matches_keyword(&msg.text);
+                let matched = self.giveaway.matches_keyword(msg.text());
                 let follow = self.entrants_at_bottom();
                 let outcome = self.giveaway.on_message(&msg, &self.config.weights, now);
                 if outcome == MessageOutcome::Entered {
@@ -325,7 +325,7 @@ impl AppView {
                 }
                 if let Some(session) = &mut self.session {
                     let kind = LogKind::from_outcome(outcome, matched);
-                    session.record(now, kind, &msg.user_id, &msg.display_name);
+                    session.record(now, kind, &msg.user().id, msg.display_name());
                     self.stats.record_message(now);
                     if outcome == MessageOutcome::Entered {
                         self.stats.record_entry(now);
@@ -580,9 +580,9 @@ impl AppView {
             .collect();
         match self.giveaway.draw(&weights, &mut rand::rng()) {
             DrawOutcome::Winner(winner) => {
-                self.log_winner(&winner.user_id, &winner.display_name);
+                self.log_winner(&winner.user.id, &winner.display_name);
                 let reel = stage::reveal_reel(&pool, &winner.display_name, &mut rand::rng());
-                self.send(ChatCommand::WinnerDrawn(winner.user_id.clone()));
+                self.send(ChatCommand::WinnerDrawn(winner.user.clone()));
                 self.stage = Stage::Revealing {
                     reel,
                     frame: 0,

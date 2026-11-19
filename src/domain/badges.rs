@@ -28,19 +28,41 @@ struct BadgeVersion {
     image_url_2x: String,
 }
 
-/// Twitch's badge image host. The list comes from a third party, so any other address is dropped
-/// and the app never loads a URL it was merely told to load.
-const BADGE_CDN: &str = "https://static-cdn.jtvnw.net/";
+/// Image hosts badge pictures may come from: Twitch's CDN, Kick's file host and YouTube's image
+/// host. The addresses come from third parties, so any other address is dropped and the app never
+/// loads a URL it was merely told to load.
+const BADGE_HOSTS: [&str; 3] = [
+    "https://static-cdn.jtvnw.net/",
+    "https://files.kick.com/",
+    "https://yt3.ggpht.com/",
+];
 
-/// Subscriber badge version (as chat sends it) to image URL, keeping only Twitch CDN images.
-pub fn subscriber_badge_images(json: &str) -> Result<HashMap<String, String>, serde_json::Error> {
+/// A badge picture address on one of the allowed image hosts.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BadgeUrl(String);
+
+impl BadgeUrl {
+    /// `None` for anything outside `BADGE_HOSTS`.
+    pub fn parse(raw: &str) -> Option<Self> {
+        BADGE_HOSTS
+            .iter()
+            .any(|host| raw.starts_with(host))
+            .then(|| Self(raw.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Subscriber badge version (as chat sends it) to picture, keeping only allowed image hosts.
+pub fn subscriber_badge_images(json: &str) -> Result<HashMap<String, BadgeUrl>, serde_json::Error> {
     let sets: Vec<BadgeSet> = serde_json::from_str(json)?;
     Ok(sets
         .into_iter()
         .filter(|set| set.set_id == "subscriber")
         .flat_map(|set| set.versions)
-        .filter(|version| version.image_url_2x.starts_with(BADGE_CDN))
-        .map(|version| (version.id, version.image_url_2x))
+        .filter_map(|version| Some((version.id, BadgeUrl::parse(&version.image_url_2x)?)))
         .collect())
 }
 
@@ -59,7 +81,10 @@ mod tests {
         ]"#;
         let images = subscriber_badge_images(json).unwrap();
         assert_eq!(images.len(), 2);
-        assert_eq!(images["3012"], "https://static-cdn.jtvnw.net/badges/v1/b/2");
+        assert_eq!(
+            images["3012"].as_str(),
+            "https://static-cdn.jtvnw.net/badges/v1/b/2"
+        );
     }
 
     #[test]
@@ -71,6 +96,28 @@ mod tests {
             {"id":"9","image_url_2x":"http://127.0.0.1:8080/admin"}
         ]}]"#;
         assert!(subscriber_badge_images(json).unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_allowed_image_hosts_make_a_badge_url() {
+        for ok in [
+            "https://static-cdn.jtvnw.net/badges/v1/a/2",
+            "https://files.kick.com/channel_subscriber_badges/1",
+            "https://yt3.ggpht.com/abc=s32-c-k",
+        ] {
+            assert!(BadgeUrl::parse(ok).is_some(), "{ok}");
+        }
+        for bad in [
+            "",
+            "http://files.kick.com/x",
+            "https://static-cdn.jtvnw.net.evil.com/x",
+            "https://evil-files.kick.com/x",
+            "https://files.kick.com@evil.com/x",
+            "https://yt3.ggpht.com.evil.com/x",
+            "file:///C:/Windows/win.ini",
+        ] {
+            assert!(BadgeUrl::parse(bad).is_none(), "{bad}");
+        }
     }
 
     #[test]

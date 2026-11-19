@@ -11,6 +11,7 @@ use twitch_irc::message::{PrivmsgMessage, ServerMessage};
 use twitch_irc::{ClientConfig, SecureTCPTransport, TwitchIRCClient};
 
 use crate::domain::chat::{Badge, ChannelLogin, ChatMessage};
+use crate::domain::platform::UserKey;
 
 /// How often the bridge asks `twitch-irc` whether the channel is still joined. A guess, not
 /// measured: short enough that a drop shows within seconds, long enough to cost nothing.
@@ -47,21 +48,22 @@ pub enum ChatEvent {
 pub enum ChatCommand {
     Join(ChannelLogin),
     Leave,
-    /// The user with this id was just drawn. The demo chat makes them answer; Twitch ignores it.
-    WinnerDrawn(String),
+    /// This account was just drawn. The demo chat makes them answer; Twitch ignores it.
+    WinnerDrawn(UserKey),
 }
 
 pub fn to_chat_message(msg: &PrivmsgMessage) -> ChatMessage {
-    ChatMessage {
-        user_id: msg.sender.id.clone(),
-        display_name: msg.sender.name.clone(),
-        badges: msg
-            .badges
-            .iter()
-            .map(|b| Badge::new(b.name.clone(), b.version.clone()))
-            .collect(),
-        text: msg.message_text.clone(),
-    }
+    let badges: Vec<Badge> = msg
+        .badges
+        .iter()
+        .map(|b| Badge::new(b.name.clone(), b.version.clone()))
+        .collect();
+    ChatMessage::twitch(
+        msg.sender.id.clone(),
+        msg.sender.name.clone(),
+        msg.message_text.clone(),
+        &badges,
+    )
 }
 
 /// Handle to the chat thread. Dropping it closes the command channel and stops the thread.
@@ -280,15 +282,15 @@ mod tests {
 
         assert_eq!(
             to_chat_message(&msg),
-            ChatMessage {
-                user_id: "4242".into(),
-                display_name: "Viewer_1".into(),
-                badges: vec![
+            ChatMessage::twitch(
+                "4242",
+                "Viewer_1",
+                "YEP lets go",
+                &[
                     Badge::new("moderator", "1"),
                     Badge::new("subscriber", "3012")
-                ],
-                text: "YEP lets go".into(),
-            }
+                ]
+            )
         );
     }
 

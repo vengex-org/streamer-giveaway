@@ -33,7 +33,7 @@ fn main() {
                 break;
             }
             *per_sec.entry(t).or_default() += 1;
-            users.insert(m.user_id);
+            users.insert(m.user().clone());
             total += 1;
         }
     }

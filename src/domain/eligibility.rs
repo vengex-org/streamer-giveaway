@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use super::platform::UserKey;
 use super::role::Role;
 
 /// Unit of the "active in chat" window.
@@ -74,7 +75,7 @@ impl Eligibility {
 /// When each chatter last wrote something other than the keyword, since the app connected.
 #[derive(Debug, Clone)]
 pub struct ActivityLog {
-    last_chat: HashMap<String, Instant>,
+    last_chat: HashMap<UserKey, Instant>,
     /// Size at which the next pruning runs.
     prune_at: usize,
     /// Smallest `prune_at`; pruning never runs below this size.
@@ -105,24 +106,29 @@ impl ActivityLog {
     /// Records chat activity at `now`. When the log is large it drops chatters quiet for longer
     /// than `window` (and at least a day); afterwards it waits until it has doubled before pruning
     /// again, so a big, busy chat does not prune on every message.
-    pub fn record(&mut self, user_id: &str, now: Instant, window: Duration) {
+    pub fn record(&mut self, user: &UserKey, now: Instant, window: Duration) {
         if self.last_chat.len() >= self.prune_at {
             let keep = window.max(MIN_KEEP);
             self.last_chat
                 .retain(|_, seen| now.saturating_duration_since(*seen) <= keep);
             self.prune_at = (self.last_chat.len() * 2).max(self.prune_floor);
         }
-        self.last_chat.insert(user_id.to_owned(), now);
+        self.last_chat.insert(user.clone(), now);
     }
 
-    pub fn last(&self, user_id: &str) -> Option<Instant> {
-        self.last_chat.get(user_id).copied()
+    pub fn last(&self, user: &UserKey) -> Option<Instant> {
+        self.last_chat.get(user).copied()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::platform::Platform;
+
+    fn user(id: &str) -> UserKey {
+        UserKey::new(Platform::Twitch, id)
+    }
 
     const MIN: Duration = Duration::from_secs(60);
 
@@ -205,10 +211,10 @@ mod tests {
     fn log_keeps_the_latest_time_per_user() {
         let start = Instant::now();
         let mut log = ActivityLog::default();
-        log.record("1", start, MIN);
-        log.record("1", start + MIN, MIN);
-        assert_eq!(log.last("1"), Some(start + MIN));
-        assert_eq!(log.last("2"), None);
+        log.record(&user("1"), start, MIN);
+        log.record(&user("1"), start + MIN, MIN);
+        assert_eq!(log.last(&user("1")), Some(start + MIN));
+        assert_eq!(log.last(&user("2")), None);
     }
 
     const HOUR: Duration = Duration::from_secs(3600);
@@ -217,21 +223,21 @@ mod tests {
     fn pruning_keeps_everyone_inside_a_long_window() {
         let start = Instant::now();
         let mut log = ActivityLog::with_prune_above(2);
-        log.record("old", start, 48 * HOUR);
-        log.record("mid", start + 18 * HOUR, 48 * HOUR);
-        log.record("new", start + 30 * HOUR, 48 * HOUR);
-        assert_eq!(log.last("old"), Some(start));
+        log.record(&user("old"), start, 48 * HOUR);
+        log.record(&user("mid"), start + 18 * HOUR, 48 * HOUR);
+        log.record(&user("new"), start + 30 * HOUR, 48 * HOUR);
+        assert_eq!(log.last(&user("old")), Some(start));
     }
 
     #[test]
     fn pruning_drops_chatters_quiet_for_longer_than_a_day() {
         let start = Instant::now();
         let mut log = ActivityLog::with_prune_above(2);
-        log.record("old", start, MIN);
-        log.record("mid", start + 2 * HOUR, MIN);
-        log.record("new", start + 25 * HOUR, MIN);
-        assert_eq!(log.last("old"), None);
-        assert_eq!(log.last("mid"), Some(start + 2 * HOUR));
+        log.record(&user("old"), start, MIN);
+        log.record(&user("mid"), start + 2 * HOUR, MIN);
+        log.record(&user("new"), start + 25 * HOUR, MIN);
+        assert_eq!(log.last(&user("old")), None);
+        assert_eq!(log.last(&user("mid")), Some(start + 2 * HOUR));
     }
 
     #[test]
@@ -239,7 +245,7 @@ mod tests {
         let start = Instant::now();
         let mut log = ActivityLog::with_prune_above(2);
         for i in 0..10 {
-            log.record(&i.to_string(), start, MIN);
+            log.record(&user(&i.to_string()), start, MIN);
         }
         // Nobody was old enough to drop, so each pruning doubled the threshold: 2, 4, 8, 16.
         assert_eq!(log.prune_at, 16);

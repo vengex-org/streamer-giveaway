@@ -129,12 +129,12 @@ pub fn feed(seed: u64) -> Vec<(Duration, ChatMessage)> {
         .enumerate()
         .map(|(n, offset)| {
             let msg = if n % 997 == 500 {
-                ChatMessage {
-                    user_id: BROADCASTER_ID.into(),
-                    display_name: DEMO_CHANNEL.into(),
-                    badges: vec![Badge::new("broadcaster", "1")],
-                    text: format!("type {DEMO_KEYWORD} to enter!"),
-                }
+                ChatMessage::twitch(
+                    BROADCASTER_ID,
+                    DEMO_CHANNEL,
+                    format!("type {DEMO_KEYWORD} to enter!"),
+                    &[Badge::new("broadcaster", "1")],
+                )
             } else {
                 let who = people.choose(&mut rng).expect("chatters exist");
                 let pool: &[&str] = if rng.random_bool(ENTRY_SHARE) {
@@ -254,7 +254,7 @@ pub fn raffle_times(feed: &[(Duration, ChatMessage)]) -> RaffleTimes {
     let mut seen = std::collections::HashSet::new();
     let firsts: Vec<Duration> = feed
         .iter()
-        .filter(|(_, m)| m.text == DEMO_KEYWORD && seen.insert(m.user_id.as_str()))
+        .filter(|(_, m)| m.text() == DEMO_KEYWORD && seen.insert(m.user()))
         .map(|(at, _)| *at)
         .collect();
     let at_share = |share: f64| {
@@ -271,12 +271,7 @@ pub fn raffle_times(feed: &[(Duration, ChatMessage)]) -> RaffleTimes {
 }
 
 fn message(who: &Chatter, text: &str) -> ChatMessage {
-    ChatMessage {
-        user_id: who.user_id.clone(),
-        display_name: who.name.clone(),
-        badges: who.badges.clone(),
-        text: text.to_owned(),
-    }
+    ChatMessage::twitch(who.user_id.clone(), who.name.clone(), text, &who.badges)
 }
 
 /// Starts the simulated chat; it behaves like [`ChatBridge::spawn`] for the UI. Without a crowd it
@@ -331,19 +326,13 @@ fn run(
                         return;
                     }
                 }
-                ChatCommand::WinnerDrawn(user_id) => {
-                    let winner = script.iter().map(|(_, m)| m).find(|m| m.user_id == user_id);
+                ChatCommand::WinnerDrawn(user) => {
+                    let winner = script.iter().map(|(_, m)| m).find(|m| *m.user() == user);
                     if let Some(winner) = winner {
                         let now = Instant::now();
                         for (i, text) in WINNER_REPLIES.iter().enumerate() {
                             let at = now + WINNER_REPLY_AFTER + Duration::from_secs(4 * i as u64);
-                            replies.push((
-                                at,
-                                ChatMessage {
-                                    text: (*text).to_owned(),
-                                    ..winner.clone()
-                                },
-                            ));
+                            replies.push((at, winner.with_text(*text)));
                         }
                     }
                 }
@@ -364,10 +353,7 @@ fn run(
             if next == script.len() && now >= idle_at {
                 let (_, author) = script.choose(&mut rng).expect("the feed is not empty");
                 let line = CHATTER.choose(&mut rng).expect("lines exist");
-                let chatter = ChatMessage {
-                    text: (*line).to_owned(),
-                    ..author.clone()
-                };
+                let chatter = author.with_text(*line);
                 if !send(ChatEvent::Message(chatter)) {
                     return;
                 }
@@ -407,10 +393,10 @@ mod tests {
         let keyword = Keyword::parse(DEMO_KEYWORD).unwrap();
         let entries = feed
             .iter()
-            .filter(|(_, m)| matches(MatchMode::Word, &keyword, &m.text))
+            .filter(|(_, m)| matches(MatchMode::Word, &keyword, m.text()))
             .count();
         assert!((3000..4500).contains(&entries), "{entries} entries");
-        let people: HashSet<_> = feed.iter().map(|(_, m)| &m.user_id).collect();
+        let people: HashSet<_> = feed.iter().map(|(_, m)| m.user()).collect();
         assert!(people.len() > 1500, "{} people", people.len());
     }
 
@@ -418,24 +404,24 @@ mod tests {
     fn same_seed_gives_the_same_feed() {
         let a: Vec<_> = feed(1)
             .into_iter()
-            .map(|(t, m)| (t, m.text, m.user_id))
+            .map(|(t, m)| (t, m.text().to_owned(), m.user().clone()))
             .collect();
         let b: Vec<_> = feed(1)
             .into_iter()
-            .map(|(t, m)| (t, m.text, m.user_id))
+            .map(|(t, m)| (t, m.text().to_owned(), m.user().clone()))
             .collect();
         assert_eq!(a, b);
     }
 
     #[test]
-    fn a_chatter_keeps_the_same_badges() {
+    fn a_chatter_keeps_the_same_roles() {
         let feed = feed(42);
         let mut seen = std::collections::HashMap::new();
         for (_, m) in &feed {
             let first = seen
-                .entry(m.user_id.clone())
-                .or_insert_with(|| m.badges.clone());
-            assert_eq!(first, &m.badges, "user {}", m.user_id);
+                .entry(m.user().clone())
+                .or_insert_with(|| m.roles().to_vec());
+            assert_eq!(first, m.roles(), "user {:?}", m.user());
         }
     }
 
@@ -465,12 +451,7 @@ mod tests {
 
     #[test]
     fn throttle_spaces_messages_evenly_above_the_cap() {
-        let msg = |n: u32| ChatMessage {
-            user_id: n.to_string(),
-            display_name: "x".into(),
-            badges: vec![],
-            text: "x".into(),
-        };
+        let msg = |n: u32| ChatMessage::twitch(n.to_string(), "x", "x", &[]);
         let burst: Vec<_> = (0..4).map(|n| (Duration::ZERO, msg(n))).collect();
         let times: Vec<_> = throttle(burst, 2).into_iter().map(|(t, _)| t).collect();
         assert_eq!(
