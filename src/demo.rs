@@ -1,4 +1,4 @@
-//! Simulated Twitch chat for trying the app, recording screenshots and testing big giveaways
+//! Simulated Twitch, Kick and YouTube chat for trying the app, recording screenshots and testing big giveaways
 //! without a live stream. Start the app with `--demo`, or `--demo-viewers=8000` (see [`Crowd`])
 //! for a giveaway announced to a large audience.
 
@@ -10,7 +10,10 @@ use rand::seq::IndexedRandom;
 use rand::{RngExt, SeedableRng};
 
 use crate::chat::{ChatBridge, ChatCommand, ChatEvent, ConnectionStatus};
-use crate::domain::chat::{Badge, ChatMessage};
+use std::collections::HashSet;
+
+use crate::domain::chat::{Badge, ChatMessage, KickBadge, YouTubeBadge};
+use crate::domain::platform::Platform;
 
 pub const DEMO_CHANNEL: &str = "pixelpaladin";
 pub const DEMO_KEYWORD: &str = "GIVEME";
@@ -28,6 +31,10 @@ const IDLE_MESSAGE_EVERY: Duration = Duration::from_millis(400);
 const WINNER_REPLY_AFTER: Duration = Duration::from_secs(6);
 /// The broadcaster's user id; their own "GIVEME" shows that the app never lets them enter.
 const BROADCASTER_ID: &str = "0";
+/// Of every 20 chatters, this many are on Kick and this many on YouTube; the rest on Twitch. A
+/// made-up split for the demo, roughly a multistream that started on Twitch.
+const KICK_PER_20: usize = 3;
+const YOUTUBE_PER_20: usize = 3;
 
 const FIRST: [&str; 16] = [
     "Pixel", "Turbo", "Sneaky", "Cozy", "Mega", "Lucky", "Shadow", "Frosty", "Salty", "Hyper",
@@ -68,12 +75,23 @@ const WINNER_REPLIES: [&str; 2] = [
     "thank you so much, how do I claim it?",
 ];
 
-/// One simulated chatter. Badges stay the same for all their messages.
+/// One simulated chatter. Platform and badges stay the same for all their messages; badges are
+/// written the Twitch way and translated for the other platforms.
 #[derive(Debug, Clone)]
 struct Chatter {
+    platform: Platform,
     user_id: String,
     name: String,
     badges: Vec<Badge>,
+}
+
+/// Spreads chatters over the platforms by their number, so the random draws stay as before.
+fn platform_of(index: usize) -> Platform {
+    match index % 20 {
+        n if n < KICK_PER_20 => Platform::Kick,
+        n if n < KICK_PER_20 + YOUTUBE_PER_20 => Platform::YouTube,
+        _ => Platform::Twitch,
+    }
 }
 
 fn chatters(rng: &mut StdRng, count: usize) -> Vec<Chatter> {
@@ -86,7 +104,13 @@ fn chatters(rng: &mut StdRng, count: usize) -> Vec<Chatter> {
                 1 => format!("{first}_{second}{i}"),
                 _ => format!("{}{}{}", first.to_lowercase(), second, i),
             };
+            let platform = platform_of(i);
+            let name = match platform {
+                Platform::YouTube => format!("@{name}"),
+                Platform::Twitch | Platform::Kick => name,
+            };
             Chatter {
+                platform,
                 user_id: i.to_string(),
                 name,
                 badges: badges(rng),
@@ -271,7 +295,34 @@ pub fn raffle_times(feed: &[(Duration, ChatMessage)]) -> RaffleTimes {
 }
 
 fn message(who: &Chatter, text: &str) -> ChatMessage {
-    ChatMessage::twitch(who.user_id.clone(), who.name.clone(), text, &who.badges)
+    let (id, name) = (who.user_id.clone(), who.name.clone());
+    match who.platform {
+        Platform::Twitch => ChatMessage::twitch(id, name, text, &who.badges),
+        Platform::Kick => {
+            let badges: Vec<KickBadge> = who
+                .badges
+                .iter()
+                .map(|badge| KickBadge {
+                    kind: badge.name.clone(),
+                    // Twitch writes the tier in the thousands and the months below them.
+                    months: badge.version.parse::<u32>().ok().map(|v| (v % 1000).max(1)),
+                })
+                .collect();
+            ChatMessage::kick(id, name, text, &badges)
+        }
+        Platform::YouTube => {
+            let badges: Vec<YouTubeBadge> = who
+                .badges
+                .iter()
+                .filter_map(|badge| match badge.name.as_str() {
+                    "subscriber" => Some(YouTubeBadge::Member(None)),
+                    "moderator" => Some(YouTubeBadge::Moderator),
+                    _ => None,
+                })
+                .collect();
+            ChatMessage::youtube(format!("UC{id}"), name, text, &badges)
+        }
+    }
 }
 
 /// Starts the simulated chat; it behaves like [`ChatBridge::spawn`] for the UI. Without a crowd it
@@ -299,6 +350,8 @@ fn run(
 ) {
     let mut rng = StdRng::seed_from_u64(7);
     let mut started: Option<Instant> = None;
+    // Only chats the UI joined deliver their part of the feed.
+    let mut joined: HashSet<Platform> = HashSet::new();
     let mut next = 0;
     let mut idle_at = Instant::now();
     let mut replies: Vec<(Instant, ChatMessage)> = Vec::new();
@@ -315,15 +368,22 @@ fn run(
                     };
                     let connected = send(ChatEvent::Status(platform, connecting));
                     thread::sleep(Duration::from_millis(600));
-                    let joined = ChatEvent::Status(platform, ConnectionStatus::Connected(target));
-                    if !connected || !send(joined) {
+                    let joined_event =
+                        ChatEvent::Status(platform, ConnectionStatus::Connected(target));
+                    if !connected || !send(joined_event) {
                         return;
                     }
-                    started = Some(Instant::now());
-                    next = 0;
+                    if joined.is_empty() {
+                        started = Some(Instant::now());
+                        next = 0;
+                    }
+                    joined.insert(platform);
                 }
                 ChatCommand::Leave(platform) => {
-                    started = None;
+                    joined.remove(&platform);
+                    if joined.is_empty() {
+                        started = None;
+                    }
                     if !send(ChatEvent::Status(platform, ConnectionStatus::Idle)) {
                         return;
                     }
@@ -347,7 +407,10 @@ fn run(
         let now = Instant::now();
         if let Some(start) = started {
             while next < script.len() && start + script[next].0 <= now {
-                if !send(ChatEvent::Message(script[next].1.clone())) {
+                let message = &script[next].1;
+                if joined.contains(&message.platform())
+                    && !send(ChatEvent::Message(message.clone()))
+                {
                     return;
                 }
                 next += 1;
@@ -376,6 +439,8 @@ fn run(
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+
+    use crate::domain::role::Role;
 
     use super::*;
     use crate::domain::chat::Keyword;
@@ -460,5 +525,35 @@ mod tests {
             times,
             [0, 500, 1000, 1500].map(Duration::from_millis).to_vec()
         );
+    }
+
+    #[test]
+    fn the_feed_has_chatters_on_every_platform() {
+        let feed = feed(42);
+        let count = |platform| {
+            feed.iter()
+                .filter(|(_, m)| m.platform() == platform)
+                .count()
+        };
+        let (twitch, kick, youtube) = (
+            count(Platform::Twitch),
+            count(Platform::Kick),
+            count(Platform::YouTube),
+        );
+        assert!(twitch > kick + youtube, "{twitch} {kick} {youtube}");
+        assert!(kick > 500 && youtube > 500, "{kick} {youtube}");
+    }
+
+    #[test]
+    fn kick_and_youtube_demo_subs_get_their_platform_roles() {
+        let feed = feed(42);
+        let has = |platform, role| {
+            feed.iter()
+                .any(|(_, m)| m.platform() == platform && m.roles().contains(&role))
+        };
+        assert!(has(Platform::Kick, Role::SubT1));
+        assert!(has(Platform::YouTube, Role::SubT1));
+        assert!(has(Platform::YouTube, Role::Mod));
+        assert!(!has(Platform::Kick, Role::SubT3));
     }
 }

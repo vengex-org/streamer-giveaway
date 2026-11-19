@@ -50,6 +50,11 @@ login or a browser source.
 |---|---|---|
 | ![Entries](docs/entries-dark.png) | ![Winner](docs/winner-dark.png) | ![Rules and search](docs/rules-search-light.png) |
 
+Multistream: Twitch, Kick and YouTube chats feed one giveaway, and each entrant shows the logo of
+their chat.
+
+![Multistream with three chats](docs/multistream-dark.png)
+
 ## Try it without a stream
 
 Press "Try demo" in the top bar. A second window opens with a simulated chat, so you can run a
@@ -141,9 +146,9 @@ cargo fmt --check
   `youtube.rs`); `src/demo.rs` is the simulated chat.
 - `src/ui/` is the window: `steps.rs` (left column), `stage.rs` (the part viewers see),
   `header.rs`, `palette.rs` (colors for both themes).
-- `cargo run --release --example chat_rate -- <channel> 60` measures a live chat for 60 seconds
-  (`<channel>` is a Twitch login, `kick:<name>` or `youtube:<link or @handle>`)
-  (messages per second, peak, unique chatters). `cargo run --release --example raffle_sim` prints
+- `cargo run --release --example chat_rate -- <channel> 60` measures a live chat for 60 seconds:
+  messages per second, peak and unique chatters. `<channel>` is a Twitch login, `kick:<name>` or
+  `youtube:<link or @handle>`. `cargo run --release --example raffle_sim` prints
   how long giveaways take for several audience sizes and delivery caps.
 - Texts live in `locales/app.toml`. A test fails when a language is missing or when UI code passes
   text that is not translated.
