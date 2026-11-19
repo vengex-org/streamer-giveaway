@@ -6076,6 +6076,7 @@ dependencies = [
  "async-channel",
  "chrono",
  "directories",
+ "embed-resource",
  "gpui-kit",
  "indexmap",
  "rand 0.10.4",
