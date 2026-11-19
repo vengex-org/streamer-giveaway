@@ -725,6 +725,18 @@ en = "Opens a second window with a simulated chat. Your settings and channel sta
 cs = "Otevře druhé okno se simulovaným chatem. Tvoje nastavení a kanál se nezmění."
 es = "Abre una segunda ventana con un chat simulado. Tu configuración y tu canal no cambian."
 
+[header.update]
+sk = "Nová verzia %{version}"
+en = "New version %{version}"
+cs = "Nová verze %{version}"
+es = "Nueva versión %{version}"
+
+[header.update_tooltip]
+sk = "Otvorí stránku na stiahnutie v prehliadači"
+en = "Opens the download page in your browser"
+cs = "Otevře stránku ke stažení v prohlížeči"
+es = "Abre la página de descarga en el navegador"
+
 [header.demo.chat]
 sk = "Chat"
 en = "Chat"

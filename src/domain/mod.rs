@@ -10,4 +10,5 @@ pub mod role;
 pub mod search;
 pub mod session_log;
 pub mod stats;
+pub mod update;
 pub mod winner;

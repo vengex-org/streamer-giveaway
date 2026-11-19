@@ -105,6 +105,17 @@ impl AppView {
                 )
                 .into_any_element(),
         };
+        // Only once a newer release is out; opens its download page.
+        let update = self.newer_release.as_ref().map(|release| {
+            let url = release.url.clone();
+            Button::new("update")
+                .small()
+                .ghost()
+                .icon(IconName::CircleArrowUp)
+                .label(t!("header.update", version = release.version).into_owned())
+                .tooltip(t!("header.update_tooltip").into_owned())
+                .on_click(move |_, _, cx| cx.open_url(&url))
+        });
         let pages = [
             (Page::Giveaway, t!("nav.giveaway")),
             (Page::History, t!("nav.history")),
@@ -162,6 +173,7 @@ impl AppView {
                     .child(div().text_sm().text_color(p.muted).truncate().child(status)),
             )
             .child(div().flex_1())
+            .children(update)
             .child(demo)
             // The select fills its parent, so a fixed box keeps it from taking the header's room.
             .child(

@@ -12,7 +12,8 @@ gpui_kit::assets::icon_assets!(
         MessageCircleMore,
         SunMoon,
         Search,
-        FlaskConical
+        FlaskConical,
+        CircleArrowUp
     ]
 );
 

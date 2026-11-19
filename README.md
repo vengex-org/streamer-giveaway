@@ -85,12 +85,14 @@ that. These defaults are guesses; the CSV log of a real giveaway shows the real 
 
 Windows builds are on the [releases page](https://github.com/vengex-org/streamer-giveaway/releases).
 The .exe is not signed, so Windows SmartScreen may warn before the first start ("More info", then
-"Run anyway").
+"Run anyway"). When a newer release is out, "New version" shows in the app's top bar and opens
+its download page.
 
 ## Privacy
 
-The app sends nothing anywhere unless you ask it to. When you connect a chat it reads it
-anonymously, without your login:
+At start the app asks GitHub once for the newest release. The request carries only the app's
+version. Apart from that, the app sends nothing anywhere unless you ask it to. When you connect a
+chat it reads it anonymously, without your login:
 
 - Twitch: the chat over Twitch's IRC, and the channel's subscriber badge pictures from
   [api.ivr.fi](https://api.ivr.fi), a community Twitch API.

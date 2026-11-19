@@ -25,11 +25,13 @@ use crate::domain::prefs::{Language, ThemeChoice, effective_theme};
 use crate::domain::role::{Role, Weights};
 use crate::domain::session_log::{self, LogKind, SessionLog};
 use crate::domain::stats::ChatStats;
+use crate::domain::update::{self, Release};
 use crate::domain::winner::{WaitState, WinnerWatch};
 use crate::i18n;
 use crate::storage::{self, ConfigStore};
 use header::{LanguageOption, language_options};
 use history::History;
+use http_client::HttpRequestExt as _;
 use palette::Palette;
 use stage::{Stage, TICK};
 
@@ -159,6 +161,9 @@ pub struct AppView {
     badge_images: BadgeImages,
     /// Badge list downloads in flight, one per platform.
     badge_fetch: HashMap<Platform, Task<()>>,
+    /// A newer release than this build, once the startup check found one.
+    newer_release: Option<Release>,
+    _update_check: Option<Task<()>>,
     /// "Clear history" was pressed once and waits for the confirming second press.
     confirm_clear_history: bool,
     stats_ticker: Option<Task<()>>,
@@ -304,6 +309,9 @@ impl AppView {
         })
         .detach();
 
+        // The demo is a second window of the same build, so only the live one asks.
+        let update_check = (mode == RunMode::Live).then(|| Self::check_for_update(cx));
+
         let mut giveaway = Giveaway::new(config.keyword.clone(), config.mode);
         giveaway.set_eligibility(config.eligibility);
 
@@ -347,6 +355,8 @@ impl AppView {
             search_hits_query: None,
             badge_images: BadgeImages::default(),
             badge_fetch: HashMap::new(),
+            newer_release: None,
+            _update_check: update_check,
             confirm_clear_history: false,
             stats_ticker: None,
             _subscriptions: subscriptions,
@@ -830,17 +840,14 @@ impl AppView {
         self.badge_images.clear(platform);
         let client = cx.http_client();
         let task = cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
-            let body = async {
-                use futures::AsyncReadExt as _;
-                let mut response = client
-                    .get(&url, http_client::AsyncBody::empty(), true)
-                    .await?;
-                anyhow::ensure!(response.status().is_success(), "HTTP {}", response.status());
-                let mut body = String::new();
-                response.body_mut().read_to_string(&mut body).await?;
-                Ok::<_, anyhow::Error>(body)
-            }
-            .await;
+            let request = http_client::Builder::new()
+                .uri(&url)
+                .follow_redirects(http_client::RedirectPolicy::FollowAll)
+                .body(http_client::AsyncBody::empty());
+            let body = match request {
+                Ok(request) => download_text(client, request).await,
+                Err(err) => Err(err.into()),
+            };
             let applied = match body {
                 Ok(body) => this
                     .update(cx, |view, cx| {
@@ -862,6 +869,39 @@ impl AppView {
             }
         });
         self.badge_fetch.insert(platform, task);
+    }
+
+    /// Asks GitHub once whether a newer release is out. A failure (offline, rate limit) only
+    /// means no hint is shown, so it is logged.
+    fn check_for_update(cx: &mut Context<Self>) -> Task<()> {
+        let client = cx.http_client();
+        cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+            let request = http_client::Builder::new()
+                .uri(update::latest_release_url())
+                // GitHub's API turns away requests without one.
+                .header(
+                    "User-Agent",
+                    concat!("streamer-giveaway/", env!("CARGO_PKG_VERSION")),
+                )
+                .header("Accept", "application/vnd.github+json")
+                .body(http_client::AsyncBody::empty());
+            let release = async {
+                let body = download_text(client, request?).await?;
+                Ok::<_, anyhow::Error>(update::newer_release(&body, env!("CARGO_PKG_VERSION"))?)
+            }
+            .await;
+            match release {
+                Ok(Some(release)) => {
+                    this.update(cx, |view, cx| {
+                        view.newer_release = Some(release);
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok(None) => {}
+                Err(err) => tracing::info!("update check failed: {err:#}"),
+            }
+        })
     }
 
     /// Starts this app again in demo mode, as a second window with its own settings, so the
@@ -1071,4 +1111,17 @@ impl Render for AppView {
                     .into_any_element(),
             })
     }
+}
+
+/// Downloads `request`'s body as text; a status other than success is an error.
+async fn download_text(
+    client: std::sync::Arc<dyn http_client::HttpClient>,
+    request: http_client::Request<http_client::AsyncBody>,
+) -> anyhow::Result<String> {
+    use futures::AsyncReadExt as _;
+    let mut response = client.send(request).await?;
+    anyhow::ensure!(response.status().is_success(), "HTTP {}", response.status());
+    let mut body = String::new();
+    response.body_mut().read_to_string(&mut body).await?;
+    Ok(body)
 }
