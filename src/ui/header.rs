@@ -83,15 +83,29 @@ impl AppView {
                 .tooltip(t!("header.demo.tooltip").into_owned())
                 .on_click(cx.listener(|this, _, _, cx| this.open_demo(cx)))
                 .into_any_element(),
-            RunMode::Demo => div()
-                .px_2()
-                .py_0p5()
-                .rounded_md()
-                .bg(p.accent_soft)
-                .text_sm()
-                .font_semibold()
-                .text_color(p.accent_text)
-                .child(t!("header.demo.badge").into_owned())
+            RunMode::Demo => h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    Button::new("chat-window")
+                        .small()
+                        .ghost()
+                        .icon(IconName::MessageSquare)
+                        .label(t!("header.demo.chat").into_owned())
+                        .tooltip(t!("header.demo.chat_tooltip").into_owned())
+                        .on_click(cx.listener(|this, _, _, cx| this.show_chat_window(cx))),
+                )
+                .child(
+                    div()
+                        .px_2()
+                        .py_0p5()
+                        .rounded_md()
+                        .bg(p.accent_soft)
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(p.accent_text)
+                        .child(t!("header.demo.badge").into_owned()),
+                )
                 .into_any_element(),
         };
         let pages = [

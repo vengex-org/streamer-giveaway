@@ -713,6 +713,30 @@ en = "Opens a second window with a simulated chat. Your settings and channel sta
 cs = "Otevře druhé okno se simulovaným chatem. Tvoje nastavení a kanál se nezmění."
 es = "Abre una segunda ventana con un chat simulado. Tu configuración y tu canal no cambian."
 
+[header.demo.chat]
+sk = "Chat"
+en = "Chat"
+cs = "Chat"
+es = "Chat"
+
+[header.demo.chat_tooltip]
+sk = "Ukáže okno so simulovaným chatom tak, ako ho appka číta."
+en = "Shows the window with the simulated chat as the app reads it."
+cs = "Ukáže okno se simulovaným chatem tak, jak ho appka čte."
+es = "Muestra la ventana con el chat simulado tal como lo lee la app."
+
+[chat_window.title]
+sk = "Simulovaný chat (demo)"
+en = "Simulated chat (demo)"
+cs = "Simulovaný chat (demo)"
+es = "Chat simulado (demo)"
+
+[chat_window.count]
+sk = "%{count} správ, zobrazených posledných %{kept}"
+en = "%{count} messages, showing the last %{kept}"
+cs = "%{count} zpráv, zobrazeno posledních %{kept}"
+es = "%{count} mensajes, se muestran los últimos %{kept}"
+
 [header.demo.badge]
 sk = "Demo"
 en = "Demo"

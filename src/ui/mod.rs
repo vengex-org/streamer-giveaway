@@ -1,3 +1,4 @@
+mod chat_window;
 mod header;
 mod history;
 mod palette;
@@ -134,6 +135,8 @@ pub struct AppView {
     window_input: Entity<InputState>,
     language_select: Entity<SelectState<Vec<LanguageOption>>>,
     entrants_scroll: UniformListScrollHandle,
+    /// Demo only: the window that shows the simulated chat, while it is open.
+    chat_window: Option<(AnyWindowHandle, WeakEntity<chat_window::ChatWindow>)>,
     ticker: Option<Task<()>>,
     /// Throughput while entries are open.
     stats: ChatStats,
@@ -276,6 +279,14 @@ impl AppView {
             );
         }
 
+        // The demo opens its chat window next to the main one, once the main one exists.
+        if mode == RunMode::Demo {
+            cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
+                this.update(cx, |view, cx| view.show_chat_window(cx)).ok();
+            })
+            .detach();
+        }
+
         let events = bridge.events.clone();
         cx.spawn(async move |this: WeakEntity<Self>, cx: &mut AsyncApp| {
             while let Ok(event) = events.recv().await {
@@ -320,6 +331,7 @@ impl AppView {
             window_input,
             language_select,
             entrants_scroll: UniformListScrollHandle::new(),
+            chat_window: None,
             ticker: None,
             stats: ChatStats::default(),
             session: None,
@@ -355,6 +367,9 @@ impl AppView {
     fn on_chat_event(&mut self, event: ChatEvent, cx: &mut Context<Self>) -> bool {
         match event {
             ChatEvent::Message(msg) => {
+                if let Some(chat) = self.open_chat_window() {
+                    chat.update(cx, |chat, cx| chat.push(&msg, cx));
+                }
                 let now = Instant::now();
                 let matched = self.giveaway.matches_keyword(msg.text());
                 let follow = self.entrants_at_bottom();
@@ -831,6 +846,27 @@ impl AppView {
 
     /// Starts this app again in demo mode, as a second window with its own settings, so the
     /// streamer can try a giveaway without touching their real channel or settings.
+    /// The demo's chat window, when it is open.
+    fn open_chat_window(&self) -> Option<Entity<chat_window::ChatWindow>> {
+        self.chat_window.as_ref()?.1.upgrade()
+    }
+
+    /// Brings the demo's chat window to the front, opening it again if it was closed.
+    fn show_chat_window(&mut self, cx: &mut Context<Self>) {
+        if self.open_chat_window().is_some()
+            && let Some((handle, _)) = &self.chat_window
+            && handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+        {
+            return;
+        }
+        match chat_window::ChatWindow::open(self.palette, cx) {
+            Ok((handle, chat)) => self.chat_window = Some((handle, chat.downgrade())),
+            Err(err) => tracing::warn!("chat window not opened: {err}"),
+        }
+    }
+
     fn open_demo(&mut self, cx: &mut Context<Self>) {
         let started = std::env::current_exe()
             .and_then(|exe| std::process::Command::new(exe).arg("--demo").spawn());
@@ -973,6 +1009,10 @@ impl AppView {
         let theme = self.theme();
         self.palette = Palette::for_theme(theme);
         Palette::apply(theme, window, cx);
+        if let Some(chat) = self.open_chat_window() {
+            let palette = self.palette;
+            chat.update(cx, |chat, cx| chat.set_palette(palette, cx));
+        }
         cx.notify();
     }
 }

@@ -56,7 +56,9 @@ of their chat.
 ## Try it without a stream
 
 Press "Try demo" in the top bar. A second window opens with a simulated chat, so you can run a
-whole giveaway without going live. Your real settings and channel stay as they are.
+whole giveaway without going live. Your real settings and channel stay as they are. A third
+window shows the simulated chat as the app reads it, at the speed it arrives; "Chat" in the demo's
+top bar opens it again after you close it.
 
 From a terminal the same window starts with:
 
@@ -117,8 +119,8 @@ The first build takes several minutes.
 
 ## How to run a giveaway
 
-1. Pick one platform or Multistream, type your channel name (or YouTube stream link) and press
-   Connect.
+1. Pick one platform or Multistream, type your channel name or paste your stream link, and press
+   Connect. A Kick or YouTube link pasted in one-platform mode switches to that platform.
 2. Type the word viewers should write and press Enter.
 3. Check the rules. "Edit rules" lets you limit who can enter and give subs, VIPs or moderators
    more tickets.
