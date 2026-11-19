@@ -1,6 +1,6 @@
 [package]
 name = "streamer-giveaway"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 description = "Desktop app for chat giveaways on Twitch, Kick and YouTube: keyword entries, bonus tickets, entry conditions and a winner reveal for stream"
 license = "MIT"
