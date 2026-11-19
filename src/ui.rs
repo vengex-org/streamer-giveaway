@@ -242,7 +242,7 @@ impl AppView {
             }
             Err(err) => self.set_notice(
                 NoticeSource::Weight(role),
-                Some(format!("{}: {err}", role.label())),
+                Some(format!("{}: {err}", crate::i18n::role_label(role))),
             ),
         }
         cx.notify();
@@ -353,7 +353,7 @@ impl AppView {
             Button::new(SharedString::from(format!("mode-{mode:?}")))
                 .small()
                 .outline()
-                .label(mode.label())
+                .label(crate::i18n::mode_label(mode))
                 .selected(self.config.mode == mode)
                 .toggled(self.config.mode == mode)
                 .on_click(cx.listener(move |this, _, _, cx| this.set_mode(mode, cx)))
@@ -414,7 +414,12 @@ impl AppView {
                     .map_or(0, |(_, n)| *n);
                 v_flex()
                     .gap_1()
-                    .child(div().text_sm().font_semibold().child(role.label()))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_semibold()
+                            .child(crate::i18n::role_label(*role)),
+                    )
                     .child(Input::new(input).w(px(64.)).small())
                     .child(
                         div()
@@ -448,7 +453,7 @@ impl AppView {
                             .when(i % 2 == 1, |row| row.bg(theme.list_even))
                             .when(weight == 0, |row| row.text_color(theme.muted_foreground))
                             .child(div().flex_1().child(entrant.display_name.clone()))
-                            .child(div().w(px(80.)).child(role.label()))
+                            .child(div().w(px(80.)).child(crate::i18n::role_label(role)))
                             .child(div().w(px(60.)).text_right().child(weight.to_string()))
                     })
                     .collect::<Vec<_>>()

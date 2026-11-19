@@ -22,17 +22,6 @@ impl Role {
         Role::Vip,
         Role::Mod,
     ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Role::Pleb => "Pleb",
-            Role::SubT1 => "Sub T1",
-            Role::SubT2 => "Sub T2",
-            Role::SubT3 => "Sub T3",
-            Role::Vip => "VIP",
-            Role::Mod => "Mod",
-        }
-    }
 }
 
 /// Roles of a chatter from their badges, in `Role` order. A chatter with no other role is a Pleb.

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::chat::{ChannelLogin, Keyword};
 use super::matcher::MatchMode;
+use super::prefs::{Language, ThemeChoice, lenient};
 use super::role::Weights;
 
 /// User settings kept across restarts.
@@ -12,6 +13,12 @@ pub struct Config {
     pub keyword: Keyword,
     pub mode: MatchMode,
     pub weights: Weights,
+    /// None = follow the OS language.
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    pub language: Option<Language>,
+    /// None = follow the OS appearance.
+    #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    pub theme: Option<ThemeChoice>,
 }
 
 impl Default for Config {
@@ -21,6 +28,8 @@ impl Default for Config {
             keyword: Keyword::parse("YEP").expect("default keyword is not empty"),
             mode: MatchMode::default(),
             weights: Weights::default(),
+            language: None,
+            theme: None,
         }
     }
 }
@@ -46,11 +55,36 @@ mod tests {
             channel: Some(ChannelLogin::parse("streamer").unwrap()),
             keyword: Keyword::parse("!join").unwrap(),
             mode: MatchMode::Exact,
-            weights: Weights::default(),
+            ..Config::default()
         };
         config.weights.set(Role::SubT3, 10);
         let text = config.to_toml().unwrap();
         assert_eq!(Config::from_toml(&text).unwrap(), config);
+    }
+
+    #[test]
+    fn language_and_theme_round_trip() {
+        let config = Config {
+            language: Some(Language::Cs),
+            theme: Some(ThemeChoice::Light),
+            ..Config::default()
+        };
+        let text = config.to_toml().unwrap();
+        assert_eq!(Config::from_toml(&text).unwrap(), config);
+    }
+
+    #[test]
+    fn unknown_language_or_theme_is_unset_and_keeps_other_settings() {
+        let config = Config::from_toml(
+            "keyword = \"!join\"
+language = \"de\"
+theme = \"neon\"
+",
+        )
+        .unwrap();
+        assert_eq!(config.language, None);
+        assert_eq!(config.theme, None);
+        assert_eq!(config.keyword.as_str(), "!join");
     }
 
     #[test]

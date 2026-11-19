@@ -1,0 +1,428 @@
+_version = 2
+
+# Every leaf has sk, en, cs and es. `tests` in src/i18n.rs fails when one is missing or when the
+# %{placeholders} differ between languages.
+
+[app.title]
+sk = "Streamer Giveaway"
+en = "Streamer Giveaway"
+cs = "Streamer Giveaway"
+es = "Streamer Giveaway"
+
+# Header
+
+[header.status.idle]
+sk = "Nepripojené"
+en = "Not connected"
+cs = "Nepřipojeno"
+es = "Sin conexión"
+
+[header.status.connecting]
+sk = "Pripájam sa k #%{channel}…"
+en = "Connecting to #%{channel}…"
+cs = "Připojuji se k #%{channel}…"
+es = "Conectando a #%{channel}…"
+
+[header.status.connecting_cause]
+sk = "Pripájam sa k #%{channel}: %{cause}"
+en = "Connecting to #%{channel}: %{cause}"
+cs = "Připojuji se k #%{channel}: %{cause}"
+es = "Conectando a #%{channel}: %{cause}"
+
+[header.status.connected]
+sk = "Čítam chat #%{channel}"
+en = "Reading #%{channel} chat"
+cs = "Čtu chat #%{channel}"
+es = "Leyendo el chat de #%{channel}"
+
+[header.status.reconnecting]
+sk = "Spojenie s #%{channel} padlo, pripájam znova…"
+en = "Lost #%{channel}, reconnecting…"
+cs = "Spojení s #%{channel} spadlo, připojuji znovu…"
+es = "Se perdió #%{channel}, reconectando…"
+
+[header.status.reconnecting_cause]
+sk = "Spojenie s #%{channel} padlo, pripájam znova: %{cause}"
+en = "Lost #%{channel}, reconnecting: %{cause}"
+cs = "Spojení s #%{channel} spadlo, připojuji znovu: %{cause}"
+es = "Se perdió #%{channel}, reconectando: %{cause}"
+
+[header.theme.to_dark]
+sk = "Tmavý režim"
+en = "Dark mode"
+cs = "Tmavý režim"
+es = "Modo oscuro"
+
+[header.theme.to_light]
+sk = "Svetlý režim"
+en = "Light mode"
+cs = "Světlý režim"
+es = "Modo claro"
+
+# Steps column
+
+[step.next]
+sk = "Ďalší krok"
+en = "Next"
+cs = "Další krok"
+es = "Siguiente"
+
+[step.connect.title]
+sk = "Pripoj sa k chatu"
+en = "Connect to your chat"
+cs = "Připoj se k chatu"
+es = "Conéctate a tu chat"
+
+[step.connect.hint]
+sk = "Napíš názov svojho Twitch kanála, ten z odkazu na tvoj stream."
+en = "Type your Twitch channel name, the one in your stream link."
+cs = "Napiš název svého Twitch kanálu, ten z odkazu na tvůj stream."
+es = "Escribe el nombre de tu canal de Twitch, el de tu enlace."
+
+[step.connect.placeholder]
+sk = "názov kanála"
+en = "channel name"
+cs = "název kanálu"
+es = "nombre del canal"
+
+[step.connect.connect]
+sk = "Pripojiť"
+en = "Connect"
+cs = "Připojit"
+es = "Conectar"
+
+[step.connect.disconnect]
+sk = "Odpojiť"
+en = "Disconnect"
+cs = "Odpojit"
+es = "Desconectar"
+
+[step.keyword.title]
+sk = "Vyber kľúčové slovo"
+en = "Choose the keyword"
+cs = "Vyber klíčové slovo"
+es = "Elige la palabra clave"
+
+[step.keyword.hint]
+sk = "Diváci sa prihlásia tak, že ho napíšu do chatu. Potvrď Enterom."
+en = "Viewers enter by typing it in chat. Press Enter to apply."
+cs = "Diváci se přihlásí tak, že ho napíšou do chatu. Potvrď Enterem."
+es = "Los espectadores participan escribiéndola en el chat. Pulsa Enter para aplicar."
+
+[step.keyword.placeholder]
+sk = "napr. YEP"
+en = "e.g. YEP"
+cs = "např. YEP"
+es = "p. ej. YEP"
+
+[step.keyword.example.word]
+sk = "„%{kw} ideme“ platí, „%{kw}xyz“ nie"
+en = "“%{kw} lets go” counts, “%{kw}xyz” doesn't"
+cs = "„%{kw} jedeme“ platí, „%{kw}xyz“ ne"
+es = "«%{kw} vamos» cuenta, «%{kw}xyz» no"
+
+[step.keyword.example.exact]
+sk = "„%{kw}“ platí, „%{kw} ideme“ nie"
+en = "“%{kw}” counts, “%{kw} lets go” doesn't"
+cs = "„%{kw}“ platí, „%{kw} jedeme“ ne"
+es = "«%{kw}» cuenta, «%{kw} vamos» no"
+
+[step.keyword.example.contains]
+sk = "„%{kw}“ aj „xy%{kw}z“ platia"
+en = "“%{kw}” and “xy%{kw}z” both count"
+cs = "„%{kw}“ i „xy%{kw}z“ platí"
+es = "«%{kw}» y «xy%{kw}z» cuentan"
+
+[step.keyword.bonus_show]
+sk = "Bonusové losy ▸"
+en = "Bonus tickets ▸"
+cs = "Bonusové losy ▸"
+es = "Boletos extra ▸"
+
+[step.keyword.bonus_hide]
+sk = "Bonusové losy ▾"
+en = "Bonus tickets ▾"
+cs = "Bonusové losy ▾"
+es = "Boletos extra ▾"
+
+[step.keyword.bonus_hint]
+sk = "Viac losov = väčšia šanca. 0 = táto skupina sa nemôže prihlásiť."
+en = "More tickets = bigger chance. 0 = this group cannot enter."
+cs = "Víc losů = větší šance. 0 = tahle skupina se nemůže přihlásit."
+es = "Más boletos = más suerte. 0 = este grupo no puede participar."
+
+[step.entries.title]
+sk = "Otvor prihlášky"
+en = "Open entries"
+cs = "Otevři přihlášky"
+es = "Abre la participación"
+
+[step.entries.hint_closed]
+sk = "Keď si pripravený, otvor prihlášky a povedz chatu kľúčové slovo."
+en = "When you are ready, open entries and tell chat the keyword."
+cs = "Až budeš připravený, otevři přihlášky a řekni chatu klíčové slovo."
+es = "Cuando estés listo, abre la participación y di la palabra al chat."
+
+[step.entries.hint_open]
+sk = "Prihlášky sú otvorené. Kto napíše kľúčové slovo, je v hre."
+en = "Entries are open. Everyone who types the keyword is in."
+cs = "Přihlášky jsou otevřené. Kdo napíše klíčové slovo, je ve hře."
+es = "La participación está abierta. Quien escriba la palabra entra."
+
+[step.entries.open]
+sk = "Otvoriť prihlášky"
+en = "Open entries"
+cs = "Otevřít přihlášky"
+es = "Abrir participación"
+
+[step.entries.close]
+sk = "Zavrieť prihlášky"
+en = "Close entries"
+cs = "Zavřít přihlášky"
+es = "Cerrar participación"
+
+[step.entries.connect_first]
+sk = "Najprv sa pripoj k chatu (krok 1)."
+en = "Connect to your chat first (step 1)."
+cs = "Nejdřív se připoj k chatu (krok 1)."
+es = "Primero conéctate a tu chat (paso 1)."
+
+[step.draw.title]
+sk = "Vyžrebuj výhercu"
+en = "Draw a winner"
+cs = "Vylosuj výherce"
+es = "Sortea un ganador"
+
+[step.draw.hint]
+sk = "Pri žrebovaní sa prihlášky samy zavrú."
+en = "Entries close automatically when you draw."
+cs = "Při losování se přihlášky samy zavřou."
+es = "La participación se cierra sola al sortear."
+
+[step.draw.draw]
+sk = "Žrebovať"
+en = "Draw winner"
+cs = "Losovat"
+es = "Sortear"
+
+[step.draw.clear]
+sk = "Vymazať zoznam"
+en = "Clear list"
+cs = "Smazat seznam"
+es = "Vaciar lista"
+
+[step.draw.clear_hint]
+sk = "Zmaže všetkých prihlásených aj doterajších výhercov."
+en = "Removes everyone who entered and all past winners."
+cs = "Smaže všechny přihlášené i dosavadní výherce."
+es = "Quita a todos los participantes y a los ganadores anteriores."
+
+[step.draw.nobody]
+sk = "Zatiaľ nemá kto vyhrať: otvor prihlášky a počkaj na chat."
+en = "Nobody can win yet: open entries and wait for chat."
+cs = "Zatím nemá kdo vyhrát: otevři přihlášky a počkej na chat."
+es = "Aún nadie puede ganar: abre la participación y espera al chat."
+
+[step.draw.all_zero]
+sk = "Všetci majú 0 losov. Zvýš bonusové losy, aby sa dalo žrebovať."
+en = "Everyone left has 0 tickets. Raise a bonus ticket value to draw."
+cs = "Všichni mají 0 losů. Zvyš bonusové losy, aby šlo losovat."
+es = "Todos tienen 0 boletos. Sube los boletos extra para sortear."
+
+# Roles and match modes
+
+[role.pleb]
+sk = "Divák"
+en = "Viewer"
+cs = "Divák"
+es = "Espectador"
+
+[role.sub_t1]
+sk = "Sub 1"
+en = "Sub tier 1"
+cs = "Sub 1"
+es = "Sub nivel 1"
+
+[role.sub_t2]
+sk = "Sub 2"
+en = "Sub tier 2"
+cs = "Sub 2"
+es = "Sub nivel 2"
+
+[role.sub_t3]
+sk = "Sub 3"
+en = "Sub tier 3"
+cs = "Sub 3"
+es = "Sub nivel 3"
+
+[role.vip]
+sk = "VIP"
+en = "VIP"
+cs = "VIP"
+es = "VIP"
+
+[role.mod]
+sk = "Moderátor"
+en = "Moderator"
+cs = "Moderátor"
+es = "Moderador"
+
+[mode.word]
+sk = "Slovo"
+en = "Word"
+cs = "Slovo"
+es = "Palabra"
+
+[mode.exact]
+sk = "Celá správa"
+en = "Whole message"
+cs = "Celá zpráva"
+es = "Mensaje entero"
+
+[mode.contains]
+sk = "Obsahuje"
+en = "Contains"
+cs = "Obsahuje"
+es = "Contiene"
+
+# Stage
+
+[stage.keyword_card]
+sk = "Napíš do chatu"
+en = "Type in chat"
+cs = "Napiš do chatu"
+es = "Escribe en el chat"
+
+[stage.entered]
+sk = "prihlásených"
+en = "entered"
+cs = "přihlášených"
+es = "participantes"
+
+[stage.can_win]
+sk = "môže vyhrať"
+en = "can win"
+cs = "může vyhrát"
+es = "pueden ganar"
+
+[stage.entries_open]
+sk = "Prihlášky otvorené"
+en = "Entries open"
+cs = "Přihlášky otevřené"
+es = "Participación abierta"
+
+[stage.entries_closed]
+sk = "Prihlášky zavreté"
+en = "Entries closed"
+cs = "Přihlášky zavřené"
+es = "Participación cerrada"
+
+[stage.list.title]
+sk = "Prihlásení"
+en = "Entrants"
+cs = "Přihlášení"
+es = "Participantes"
+
+[stage.list.role]
+sk = "Rola"
+en = "Role"
+cs = "Role"
+es = "Rol"
+
+[stage.list.tickets]
+sk = "Losy"
+en = "Tickets"
+cs = "Losy"
+es = "Boletos"
+
+[stage.list.empty]
+sk = "Zatiaľ nikto. Otvor prihlášky a povedz chatu, nech napíše %{kw}."
+en = "No one yet. Open entries and tell chat to type %{kw}."
+cs = "Zatím nikdo. Otevři přihlášky a řekni chatu, ať napíše %{kw}."
+es = "Nadie todavía. Abre la participación y pide al chat que escriba %{kw}."
+
+[winner.drawing]
+sk = "Žrebujem…"
+en = "Drawing…"
+cs = "Losuji…"
+es = "Sorteando…"
+
+[winner.title]
+sk = "Výherca!"
+en = "Winner!"
+cs = "Výherce!"
+es = "¡Ganador!"
+
+[winner.since]
+sk = "%{time} od žrebovania"
+en = "%{time} since the draw"
+cs = "%{time} od losování"
+es = "%{time} desde el sorteo"
+
+[winner.waiting]
+sk = "Čakám, kým %{name} odpíše v chate…"
+en = "Waiting for %{name} to answer in chat…"
+cs = "Čekám, až %{name} odepíše v chatu…"
+es = "Esperando a que %{name} responda en el chat…"
+
+[winner.answered]
+sk = "Odpoveď prišla po %{time}"
+en = "Answered after %{time}"
+cs = "Odpověď přišla po %{time}"
+es = "Respondió tras %{time}"
+
+[winner.again]
+sk = "Žrebovať ďalšieho"
+en = "Draw another"
+cs = "Losovat dalšího"
+es = "Sortear otro"
+
+[winner.done]
+sk = "Hotovo"
+en = "Done"
+cs = "Hotovo"
+es = "Listo"
+
+# Problems shown to the user
+
+[error.keyword_empty]
+sk = "Kľúčové slovo nemôže byť prázdne."
+en = "The keyword cannot be empty."
+cs = "Klíčové slovo nemůže být prázdné."
+es = "La palabra clave no puede estar vacía."
+
+[error.channel_invalid]
+sk = "„%{raw}“ nie je platný názov kanála: použi písmená, čísla a _ (najviac 25)."
+en = "“%{raw}” is not a valid channel name: use letters, numbers and _ (25 at most)."
+cs = "„%{raw}“ není platný název kanálu: použij písmena, čísla a _ (nejvýš 25)."
+es = "«%{raw}» no es un nombre de canal válido: usa letras, números y _ (máximo 25)."
+
+[error.weight_invalid]
+sk = "%{role}: zadaj celé číslo od 0."
+en = "%{role}: enter a whole number from 0 up."
+cs = "%{role}: zadej celé číslo od 0."
+es = "%{role}: escribe un número entero desde 0."
+
+[error.chat_stopped]
+sk = "Spojenie s chatom sa zastavilo. Reštartuj aplikáciu."
+en = "The chat connection stopped. Restart the app."
+cs = "Spojení s chatem se zastavilo. Restartuj aplikaci."
+es = "La conexión con el chat se detuvo. Reinicia la aplicación."
+
+[error.chat_rejected]
+sk = "Kanál sa nepodarilo otvoriť: %{cause}"
+en = "Could not join the channel: %{cause}"
+cs = "Kanál se nepodařilo otevřít: %{cause}"
+es = "No se pudo entrar al canal: %{cause}"
+
+[error.save]
+sk = "Nastavenia sa nepodarilo uložiť: %{cause}"
+en = "Could not save settings: %{cause}"
+cs = "Nastavení se nepodařilo uložit: %{cause}"
+es = "No se pudo guardar la configuración: %{cause}"
+
+[error.startup]
+sk = "Problém s nastaveniami: %{cause}"
+en = "Settings problem: %{cause}"
+cs = "Problém s nastavením: %{cause}"
+es = "Problema con la configuración: %{cause}"

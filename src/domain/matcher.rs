@@ -17,14 +17,6 @@ pub enum MatchMode {
 
 impl MatchMode {
     pub const ALL: [MatchMode; 3] = [MatchMode::Word, MatchMode::Exact, MatchMode::Contains];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            MatchMode::Word => "Word",
-            MatchMode::Exact => "Whole message",
-            MatchMode::Contains => "Contains",
-        }
-    }
 }
 
 /// Chatterino and 7TV append this invisible tag character to a repeated message so Twitch does
