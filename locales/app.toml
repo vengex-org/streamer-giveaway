@@ -73,12 +73,6 @@ es = "Auto"
 
 # Steps column
 
-[step.next]
-sk = "Ďalší krok"
-en = "Next"
-cs = "Další krok"
-es = "Siguiente"
-
 [step.connect.title]
 sk = "Pripoj sa k chatu"
 en = "Connect to your chat"
@@ -144,18 +138,6 @@ sk = "„%{kw}“ aj „xy%{kw}z“ platia"
 en = "“%{kw}” and “xy%{kw}z” both count"
 cs = "„%{kw}“ i „xy%{kw}z“ platí"
 es = "«%{kw}» y «xy%{kw}z» cuentan"
-
-[step.keyword.bonus_show]
-sk = "Bonusové losy ▸"
-en = "Bonus tickets ▸"
-cs = "Bonusové losy ▸"
-es = "Boletos extra ▸"
-
-[step.keyword.bonus_hide]
-sk = "Bonusové losy ▾"
-en = "Bonus tickets ▾"
-cs = "Bonusové losy ▾"
-es = "Boletos extra ▾"
 
 [step.keyword.bonus_hint]
 sk = "Viac losov = väčšia šanca. 0 = táto skupina sa nemôže prihlásiť."
@@ -305,12 +287,6 @@ en = "Type in chat"
 cs = "Napiš do chatu"
 es = "Escribe en el chat"
 
-[stage.entered]
-sk = "prihlásených"
-en = "entered"
-cs = "přihlášených"
-es = "participantes"
-
 [stage.can_win]
 sk = "môže vyhrať"
 en = "can win"
@@ -441,29 +417,11 @@ es = "Problema con la configuración: %{cause}"
 
 # Who can enter (eligibility)
 
-[step.keyword.who_show]
-sk = "Kto sa môže prihlásiť ▸"
-en = "Who can enter ▸"
-cs = "Kdo se může přihlásit ▸"
-es = "Quién puede participar ▸"
-
-[step.keyword.who_hide]
-sk = "Kto sa môže prihlásiť ▾"
-en = "Who can enter ▾"
-cs = "Kdo se může přihlásit ▾"
-es = "Quién puede participar ▾"
-
 [who.everyone]
-sk = "Prihlásiť sa môže každý."
-en = "Everyone can enter."
-cs = "Přihlásit se může každý."
-es = "Cualquiera puede participar."
-
-[who.restricted]
-sk = "Prihlásiť sa môžu len: %{rules}."
-en = "Only: %{rules}."
-cs = "Přihlásit se můžou jen: %{rules}."
-es = "Solo: %{rules}."
+sk = "Každý"
+en = "Everyone"
+cs = "Každý"
+es = "Todos"
 
 [who.subs]
 sk = "len subscriberi"
@@ -556,3 +514,47 @@ sk = "Log sa nepodarilo uložiť: %{cause}"
 en = "Could not save the log: %{cause}"
 cs = "Log se nepodařilo uložit: %{cause}"
 es = "No se pudo guardar el registro: %{cause}"
+
+# Rules step
+
+[step.rules.title]
+sk = "Pravidlá"
+en = "Rules"
+cs = "Pravidla"
+es = "Reglas"
+
+[step.rules.hint]
+sk = "Nepovinné. Urči, kto sa môže prihlásiť a koľko losov dostane každá skupina."
+en = "Optional. Choose who can enter and how many tickets each group gets."
+cs = "Nepovinné. Urči, kdo se může přihlásit a kolik losů dostane každá skupina."
+es = "Opcional. Elige quién puede participar y cuántos boletos recibe cada grupo."
+
+[step.rules.who]
+sk = "Kto sa môže prihlásiť"
+en = "Who can enter"
+cs = "Kdo se může přihlásit"
+es = "Quién participa"
+
+[step.rules.who_short]
+sk = "Kto"
+en = "Who"
+cs = "Kdo"
+es = "Quién"
+
+[step.rules.tickets]
+sk = "Losy"
+en = "Tickets"
+cs = "Losy"
+es = "Boletos"
+
+[step.rules.edit]
+sk = "Upraviť pravidlá"
+en = "Edit rules"
+cs = "Upravit pravidla"
+es = "Editar reglas"
+
+[step.rules.close]
+sk = "Hotovo"
+en = "Done"
+cs = "Hotovo"
+es = "Listo"

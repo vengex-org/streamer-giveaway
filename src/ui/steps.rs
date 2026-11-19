@@ -11,11 +11,13 @@ use crate::chat::ConnectionStatus;
 use crate::domain::eligibility::TimeUnit;
 use crate::domain::giveaway::GiveawayState;
 use crate::domain::matcher::MatchMode;
+use crate::domain::role::Role;
 use crate::i18n;
 
 const CHECK: &str = "\u{2713}";
 
-/// The four steps of running a giveaway, in order.
+/// The steps the guide points at, in order. Setting the rules is optional, so it is never
+/// the step to do next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Step {
     Connect,
@@ -66,7 +68,7 @@ impl AppView {
             div()
                 .px_3()
                 .py_2()
-                .rounded_md()
+                .rounded_lg()
                 .bg(p.danger_soft)
                 .text_sm()
                 .text_color(p.danger)
@@ -75,17 +77,18 @@ impl AppView {
 
         v_flex()
             .id("steps")
-            .w(px(390.))
+            .w(px(400.))
             .flex_none()
             .h_full()
             .overflow_y_scroll()
-            .p_4()
+            .px_4()
+            .py_4()
             .gap_3()
             .bg(p.bg)
             .border_r_1()
             .border_color(p.border)
             .children(notices)
-            .child(self.step_card(
+            .child(self.step_section(
                 1,
                 next == Some(Step::Connect),
                 connected,
@@ -93,7 +96,7 @@ impl AppView {
                 t!("step.connect.hint").into_owned(),
                 self.render_connect(next == Some(Step::Connect), cx),
             ))
-            .child(self.step_card(
+            .child(self.step_section(
                 2,
                 next == Some(Step::Keyword),
                 connected && keyword_text_valid,
@@ -101,8 +104,16 @@ impl AppView {
                 t!("step.keyword.hint").into_owned(),
                 self.render_keyword(cx),
             ))
-            .child(self.step_card(
+            .child(self.step_section(
                 3,
+                self.rules_open,
+                false,
+                t!("step.rules.title").into_owned(),
+                t!("step.rules.hint").into_owned(),
+                self.render_rules(cx),
+            ))
+            .child(self.step_section(
+                4,
                 next == Some(Step::Entries),
                 open || can_win > 0,
                 t!("step.entries.title").into_owned(),
@@ -113,8 +124,8 @@ impl AppView {
                 },
                 self.render_entries(next == Some(Step::Entries), connected, open, cx),
             ))
-            .child(self.step_card(
-                4,
+            .child(self.step_section(
+                5,
                 next == Some(Step::Draw),
                 false,
                 t!("step.draw.title").into_owned(),
@@ -123,7 +134,9 @@ impl AppView {
             ))
     }
 
-    fn step_card(
+    /// One step as a grouped section: a caption with its number above a rounded container. The
+    /// step to do now gets the accent border and its hint; a finished one shows a check mark.
+    fn step_section(
         &self,
         number: usize,
         active: bool,
@@ -133,56 +146,32 @@ impl AppView {
         body: impl IntoElement,
     ) -> impl IntoElement {
         let p = self.palette;
-        let (badge_bg, badge_fg, badge) = if done && !active {
-            (p.success, p.on_accent, CHECK.to_owned())
-        } else if active {
-            (p.accent, p.on_accent, number.to_string())
+        let mark = if done && !active {
+            CHECK.to_owned()
         } else {
-            (p.surface_alt, p.muted, number.to_string())
+            number.to_string()
         };
         v_flex()
-            .px_4()
-            .py_3()
+            .p_3()
             .gap_2()
-            .rounded_lg()
+            .rounded_xl()
             .bg(p.surface)
             .border_1()
             .border_color(if active { p.accent } else { p.border })
-            .when(active, |card| card.shadow_md())
             .child(
                 h_flex()
-                    .gap_3()
-                    .items_center()
+                    .gap_2()
+                    .text_sm()
+                    .font_semibold()
                     .child(
                         div()
-                            .size(px(28.))
-                            .flex_none()
-                            .rounded_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .bg(badge_bg)
-                            .text_color(badge_fg)
-                            .text_sm()
-                            .font_bold()
-                            .child(badge),
+                            .w(px(14.))
+                            .text_color(if active { p.accent_text } else { p.muted })
+                            .child(mark),
                     )
-                    .child(div().flex_1().font_semibold().child(title))
-                    .when(active, |row| {
-                        row.child(
-                            div()
-                                .px_2()
-                                .py_0p5()
-                                .rounded_full()
-                                .bg(p.accent_soft)
-                                .text_color(p.accent)
-                                .text_xs()
-                                .font_semibold()
-                                .child(t!("step.next").into_owned()),
-                        )
-                    }),
+                    .child(div().flex_1().child(title)),
             )
-            // Only the step to do now explains itself; the rest stay short so all four fit.
+            // Only the step to do now explains itself, so the column stays short.
             .when(active, |card| {
                 card.child(div().text_sm().text_color(p.muted).child(hint))
             })
@@ -222,65 +211,94 @@ impl AppView {
                 .small()
                 .flex_1()
                 .when(selected, |b| b.primary())
-                .when(!selected, |b| b.outline())
+                .when(!selected, |b| b.ghost())
                 .label(i18n::mode_label(mode))
                 .toggled(selected)
                 .on_click(cx.listener(move |this, _, _, cx| this.set_mode(mode, cx)))
         });
-        let bonus_label = if self.bonus_open {
-            t!("step.keyword.bonus_hide")
-        } else {
-            t!("step.keyword.bonus_show")
-        };
-        let who_label = if self.who_open {
-            t!("step.keyword.who_hide")
-        } else {
-            t!("step.keyword.who_show")
-        };
 
         v_flex()
             .gap_2()
             .child(Input::new(&self.keyword_input))
-            .child(h_flex().gap_1().children(modes))
+            // A segmented control: one track, the chosen segment filled.
+            .child(
+                h_flex()
+                    .p_0p5()
+                    .gap_0p5()
+                    .rounded_lg()
+                    .bg(p.surface_alt)
+                    .children(modes),
+            )
             .child(
                 div()
                     .text_xs()
                     .text_color(p.muted)
                     .child(example.into_owned()),
             )
+    }
+
+    /// Always shows who can enter and how many tickets each group gets, so nobody has to hunt
+    /// for them; "Edit rules" opens the controls under the summary.
+    fn render_rules(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = self.palette;
+        let row = |label: String, value: AnyElement| {
+            h_flex()
+                .gap_3()
+                .items_start()
+                .child(
+                    div()
+                        .w(px(56.))
+                        .flex_none()
+                        .text_sm()
+                        .text_color(p.muted)
+                        .child(label),
+                )
+                .child(div().flex_1().min_w_0().text_sm().child(value))
+        };
+        // One item per group, wrapping as a whole, so a line never starts with a separator.
+        let tickets = h_flex()
+            .flex_wrap()
+            .gap_x_4()
+            .gap_y_1()
+            .children(Role::ALL.iter().map(|&role| {
+                h_flex().gap_1().child(i18n::role_label(role)).child(
+                    div()
+                        .font_semibold()
+                        .text_color(p.accent_text)
+                        .child(format!("×{}", self.config.weights.get(role))),
+                )
+            }))
+            .into_any_element();
+        let toggle_label = if self.rules_open {
+            t!("step.rules.close")
+        } else {
+            t!("step.rules.edit")
+        };
+        v_flex()
+            .gap_2()
+            // The editor shows the same values, so the summary steps aside while it is open.
+            .when(!self.rules_open, |col| {
+                col.child(row(
+                    t!("step.rules.who_short").into_owned(),
+                    self.who_summary().into_any_element(),
+                ))
+                .child(row(t!("step.rules.tickets").into_owned(), tickets))
+            })
+            .when(self.rules_open, |col| {
+                col.child(self.render_who(cx)).child(self.render_bonus())
+            })
             .child(
-                h_flex()
-                    .gap_1()
-                    .flex_wrap()
-                    .child(
-                        Button::new("bonus")
-                            .xsmall()
-                            .ghost()
-                            .label(bonus_label.into_owned())
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.bonus_open = !this.bonus_open;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("who")
-                            .xsmall()
-                            .ghost()
-                            .label(who_label.into_owned())
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.who_open = !this.who_open;
-                                cx.notify();
-                            })),
-                    ),
+                Button::new("rules")
+                    .small()
+                    .w_full()
+                    .when(self.rules_open, |b| b.primary())
+                    .when(!self.rules_open, |b| b.outline())
+                    .label(toggle_label.into_owned())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.rules_open = !this.rules_open;
+                        cx.notify();
+                    })),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(p.muted)
-                    .child(self.who_summary()),
-            )
-            .when(self.bonus_open, |col| col.child(self.render_bonus()))
-            .when(self.who_open, |col| col.child(self.render_who(cx)))
     }
 
     fn render_bonus(&self) -> impl IntoElement {
@@ -288,7 +306,7 @@ impl AppView {
         let fields = self.weight_inputs.iter().map(|(role, input)| {
             v_flex()
                 .gap_1()
-                .w(px(98.))
+                .w(px(96.))
                 .child(
                     div()
                         .text_xs()
@@ -301,8 +319,14 @@ impl AppView {
         v_flex()
             .gap_2()
             .p_3()
-            .rounded_md()
+            .rounded_lg()
             .bg(p.surface_alt)
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(t!("step.rules.tickets").into_owned()),
+            )
             .child(
                 div()
                     .text_xs()
@@ -331,7 +355,7 @@ impl AppView {
         if rules.is_empty() {
             t!("who.everyone").into_owned()
         } else {
-            t!("who.restricted", rules = rules.join(", ")).into_owned()
+            rules.join(", ")
         }
     }
 
@@ -343,7 +367,7 @@ impl AppView {
             Button::new(SharedString::from(format!("unit-{unit:?}")))
                 .xsmall()
                 .when(selected, |b| b.primary())
-                .when(!selected, |b| b.outline())
+                .when(!selected, |b| b.ghost())
                 .label(i18n::unit_label(unit))
                 .toggled(selected)
                 .on_click(cx.listener(move |this, _, _, cx| this.set_window_unit(unit, cx)))
@@ -351,8 +375,14 @@ impl AppView {
         v_flex()
             .gap_2()
             .p_3()
-            .rounded_md()
+            .rounded_lg()
             .bg(p.surface_alt)
+            .child(
+                div()
+                    .text_sm()
+                    .font_semibold()
+                    .child(t!("step.rules.who").into_owned()),
+            )
             .child(
                 Checkbox::new("subs-only")
                     .checked(e.subs_only)
@@ -377,7 +407,14 @@ impl AppView {
                     .pl_6()
                     .items_center()
                     .child(Input::new(&self.window_input).small().w(px(64.)))
-                    .children(units),
+                    .child(
+                        h_flex()
+                            .p_0p5()
+                            .gap_0p5()
+                            .rounded_md()
+                            .bg(p.surface)
+                            .children(units),
+                    ),
             )
             .child(
                 div()

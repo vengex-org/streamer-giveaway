@@ -81,8 +81,8 @@ pub struct AppView {
     status: ConnectionStatus,
     notices: BTreeMap<NoticeSource, Notice>,
     stage: Stage,
-    bonus_open: bool,
-    who_open: bool,
+    /// Whether the rules step shows its editor (weights and entry conditions).
+    rules_open: bool,
     os_dark: bool,
     /// The OS language, read once at startup.
     os_language: Language,
@@ -199,8 +199,7 @@ impl AppView {
                 .into_iter()
                 .collect(),
             stage: Stage::List,
-            bonus_open: false,
-            who_open: false,
+            rules_open: false,
             os_dark,
             os_language,
             palette,

@@ -13,7 +13,7 @@ impl AppView {
         let (dot, status) = match &self.status {
             ConnectionStatus::Idle => (p.muted, t!("header.status.idle")),
             ConnectionStatus::Connecting { channel, cause } => (
-                p.gold,
+                p.accent,
                 match cause {
                     Some(cause) => t!(
                         "header.status.connecting_cause",
@@ -77,26 +77,22 @@ impl AppView {
             .py_3()
             .gap_4()
             .items_center()
-            .bg(p.surface)
+            .bg(p.bg)
             .border_b_1()
             .border_color(p.border)
             .child(
                 div()
-                    .text_lg()
+                    .text_base()
                     .font_bold()
-                    .text_color(p.accent)
+                    .text_color(p.text)
                     .child(t!("app.title").into_owned()),
             )
             .child(
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .px_3()
-                    .py_1()
-                    .rounded_full()
-                    .bg(p.surface_alt)
                     .min_w_0()
-                    .child(div().size(px(9.)).rounded_full().bg(dot))
+                    .child(div().size(px(8.)).rounded_full().bg(dot))
                     .child(
                         div()
                             .text_sm()
@@ -107,6 +103,7 @@ impl AppView {
             )
             .child(div().flex_1())
             .child(h_flex().gap_1().child(auto_language).children(languages))
+            .child(div().w(px(1.)).h(px(16.)).bg(p.border))
             .child(h_flex().gap_1().children(themes))
     }
 }

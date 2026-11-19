@@ -86,87 +86,96 @@ impl AppView {
             .min_w_0()
             .h_full()
             .p_6()
-            .gap_5()
-            .child(self.render_stats(can_win))
-            .when(self.session.is_some(), |stage| {
-                stage.child(self.render_live_stats())
-            })
+            .gap_4()
+            .child(self.render_scoreboard(can_win))
             .child(body)
     }
 
-    fn render_stats(&self, can_win: usize) -> impl IntoElement {
+    /// The part viewers read from across the room: the keyword, whether entries are open, and how
+    /// many people can win. Live throughput sits in one quiet line under it while entries are open.
+    fn render_scoreboard(&self, can_win: usize) -> impl IntoElement {
         let p = self.palette;
         let open = self.giveaway.state() == GiveawayState::Open;
-        let number_card = |value: usize, label: String| {
-            v_flex()
-                .flex_1()
-                .p_5()
-                .gap_1()
-                .rounded_xl()
-                .bg(p.surface)
-                .border_1()
-                .border_color(p.border)
-                .child(
-                    div()
-                        .text_size(px(44.))
-                        .font_black()
-                        .line_height(px(48.))
-                        .child(value.to_string()),
-                )
-                .child(div().text_color(p.muted).child(label))
-        };
-        h_flex()
-            .gap_4()
+        let state = h_flex()
+            .gap_2()
+            .items_center()
+            .text_sm()
+            .font_semibold()
+            .text_color(if open { p.live } else { p.muted })
             .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .p_5()
-                    .gap_1()
-                    .rounded_xl()
-                    .bg(p.accent_soft)
-                    .border_1()
-                    .border_color(p.accent)
+                div()
+                    .size(px(10.))
+                    .rounded_full()
+                    .bg(if open { p.live } else { p.border }),
+            )
+            .child(if open {
+                t!("stage.entries_open").into_owned()
+            } else {
+                t!("stage.entries_closed").into_owned()
+            });
+        v_flex()
+            .px_6()
+            .py_5()
+            .gap_3()
+            .rounded_2xl()
+            .bg(p.surface)
+            .child(
+                h_flex()
+                    .gap_6()
+                    .items_end()
                     .child(
-                        h_flex()
-                            .flex_wrap()
-                            .justify_between()
-                            .gap_2()
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_1()
                             .child(
                                 div()
+                                    .text_sm()
                                     .text_color(p.muted)
                                     .child(t!("stage.keyword_card").into_owned()),
                             )
                             .child(
                                 div()
-                                    .px_2()
-                                    .rounded_full()
-                                    .text_xs()
-                                    .font_semibold()
-                                    .bg(if open { p.success } else { p.surface_alt })
-                                    .text_color(if open { p.on_accent } else { p.muted })
-                                    .child(if open {
-                                        t!("stage.entries_open").into_owned()
-                                    } else {
-                                        t!("stage.entries_closed").into_owned()
-                                    }),
+                                    .text_size(px(56.))
+                                    .line_height(px(60.))
+                                    .font_black()
+                                    .text_color(p.accent_text)
+                                    .truncate()
+                                    .child(self.config.keyword.as_str().to_owned()),
                             ),
                     )
                     .child(
-                        div()
-                            .text_size(px(44.))
-                            .line_height(px(48.))
-                            .font_black()
-                            .text_color(p.accent)
-                            .truncate()
-                            .child(self.config.keyword.as_str().to_owned()),
+                        v_flex()
+                            .flex_none()
+                            .items_end()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(p.muted)
+                                    .child(t!("stage.can_win").into_owned()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(56.))
+                                    .line_height(px(60.))
+                                    .font_black()
+                                    .child(can_win.to_string()),
+                            ),
                     ),
             )
-            .child(number_card(
-                self.giveaway.entrants().len(),
-                t!("stage.entered").into_owned(),
-            ))
-            .child(number_card(can_win, t!("stage.can_win").into_owned()))
+            .child(
+                h_flex()
+                    .gap_4()
+                    .items_center()
+                    .pt_3()
+                    .border_t_1()
+                    .border_color(p.border)
+                    .child(state)
+                    .when(self.session.is_some(), |row| {
+                        row.child(self.render_live_stats())
+                    }),
+            )
     }
 
     fn render_live_stats(&self) -> impl IntoElement {
@@ -177,30 +186,32 @@ impl AppView {
             Some(ago) => t!("stage.stats.last", ago = format_clock(ago)),
             None => t!("stage.stats.none"),
         };
-        let item = |text: String| div().px_3().py_1().rounded_md().bg(p.surface).child(text);
-        h_flex()
-            .gap_3()
+        let parts = [
+            t!("stage.stats.rate", rate = rate).into_owned(),
+            t!(
+                "stage.stats.new",
+                count = self.stats.entries_last_minute(now)
+            )
+            .into_owned(),
+            last.into_owned(),
+        ];
+        div()
+            .flex_1()
+            .min_w_0()
+            .truncate()
             .text_sm()
             .text_color(p.muted)
-            .child(item(t!("stage.stats.rate", rate = rate).into_owned()))
-            .child(item(
-                t!(
-                    "stage.stats.new",
-                    count = self.stats.entries_last_minute(now)
-                )
-                .into_owned(),
-            ))
-            .child(item(last.into_owned()))
+            .child(parts.join("  ·  "))
     }
 
     fn render_entrants(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let count = self.giveaway.entrants().len();
         let header = h_flex()
-            .px_4()
-            .py_2()
+            .px_5()
+            .py_2p5()
             .gap_2()
-            .text_sm()
+            .text_xs()
             .font_semibold()
             .text_color(p.muted)
             .border_b_1()
@@ -231,15 +242,16 @@ impl AppView {
                 cx.processor(|this, range: std::ops::Range<usize>, _, _| {
                     let p = this.palette;
                     range
-                        .filter_map(|i| this.giveaway.entrant_at(i).map(|entrant| (i, entrant)))
-                        .map(|(i, entrant)| {
+                        .filter_map(|i| this.giveaway.entrant_at(i))
+                        .map(|entrant| {
                             let (role, weight) = entrant.effective(&this.config.weights);
                             h_flex()
                                 .w_full()
-                                .px_4()
-                                .py_1p5()
+                                .px_5()
+                                .py_2()
                                 .gap_2()
-                                .when(i % 2 == 1, |row| row.bg(p.surface_alt))
+                                .border_b_1()
+                                .border_color(p.surface_alt)
                                 .when(weight == 0, |row| row.text_color(p.muted))
                                 .child(
                                     div()
@@ -247,7 +259,13 @@ impl AppView {
                                         .truncate()
                                         .child(entrant.display_name.clone()),
                                 )
-                                .child(div().w(px(120.)).text_sm().child(i18n::role_label(role)))
+                                .child(
+                                    div()
+                                        .w(px(120.))
+                                        .text_sm()
+                                        .text_color(p.muted)
+                                        .child(i18n::role_label(role)),
+                                )
                                 .child(
                                     div()
                                         .w(px(70.))
@@ -272,10 +290,8 @@ impl AppView {
         v_flex()
             .flex_1()
             .min_h_0()
-            .rounded_xl()
+            .rounded_2xl()
             .bg(p.surface)
-            .border_1()
-            .border_color(p.border)
             .overflow_hidden()
             .child(header)
             .child(body)
@@ -288,10 +304,8 @@ impl AppView {
             .items_center()
             .justify_center()
             .gap_3()
-            .rounded_xl()
+            .rounded_2xl()
             .bg(p.surface)
-            .border_2()
-            .border_color(p.gold)
             .child(
                 div()
                     .text_lg()
@@ -300,7 +314,7 @@ impl AppView {
             )
             .child(
                 div()
-                    .text_size(px(60.))
+                    .text_size(px(64.))
                     .font_black()
                     .text_color(p.text)
                     .child(name.to_owned()),
@@ -322,11 +336,11 @@ impl AppView {
                 .text_color(p.muted)
                 .child(t!("winner.waiting", name = winner.display_name.as_str()).into_owned()),
             WaitState::Answered { after } => div()
-                .px_3()
-                .py_1()
-                .rounded_md()
-                .bg(p.gold_soft)
-                .text_color(p.gold)
+                .px_4()
+                .py_1p5()
+                .rounded_full()
+                .bg(p.accent_soft)
+                .text_color(p.accent_text)
                 .font_semibold()
                 .child(t!("winner.answered", time = format_clock(after)).into_owned()),
         };
@@ -335,6 +349,8 @@ impl AppView {
                 .gap_3()
                 .px_4()
                 .py_2()
+                .border_b_1()
+                .border_color(p.border)
                 .child(
                     div()
                         .w(px(48.))
@@ -349,47 +365,32 @@ impl AppView {
         v_flex()
             .flex_1()
             .min_h_0()
-            .p_6()
+            .p_8()
             .gap_4()
             .items_center()
-            .rounded_xl()
+            .rounded_2xl()
             .bg(p.surface)
             .border_2()
-            .border_color(p.gold)
+            .border_color(p.accent)
             .child(
                 div()
-                    .text_lg()
-                    .font_bold()
-                    .text_color(p.gold)
+                    .text_base()
+                    .font_semibold()
+                    .text_color(p.accent_text)
                     .child(t!("winner.title").into_owned()),
             )
             .child(
-                h_flex()
-                    .gap_3()
-                    .items_center()
-                    .child(
-                        div()
-                            .text_size(px(60.))
-                            .line_height(px(64.))
-                            .font_black()
-                            .text_color(p.gold)
-                            .child(winner.display_name.clone()),
-                    )
-                    .child(
-                        div()
-                            .px_3()
-                            .py_1()
-                            .rounded_full()
-                            .bg(p.accent_soft)
-                            .text_color(p.accent)
-                            .text_sm()
-                            .font_semibold()
-                            .child(i18n::role_label(role)),
-                    ),
+                div()
+                    .text_size(px(68.))
+                    .line_height(px(72.))
+                    .font_black()
+                    .text_color(p.accent_text)
+                    .child(winner.display_name.clone()),
             )
+            .child(div().text_color(p.muted).child(i18n::role_label(role)))
             .child(
                 div()
-                    .text_xl()
+                    .text_size(px(28.))
                     .font_semibold()
                     .child(t!("winner.since", time = elapsed).into_owned()),
             )
@@ -405,7 +406,7 @@ impl AppView {
                     .flex_1()
                     .min_h(px(80.))
                     .overflow_y_scroll()
-                    .rounded_md()
+                    .rounded_xl()
                     .bg(p.surface_alt)
                     .children(replies)
                     .into_any_element()

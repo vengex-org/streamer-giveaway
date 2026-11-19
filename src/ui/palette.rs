@@ -6,8 +6,9 @@ use serde_json::json;
 
 use crate::domain::prefs::ThemeChoice;
 
-/// The app's colors as `0xRRGGBB` (or `0xRRGGBBAA` for the soft tints). One violet accent for
-/// actions, gold only for the winner.
+/// The app's colors as `0xRRGGBB` (or `0xRRGGBBAA` for the soft tints). Warm neutral tonal
+/// surfaces (Material You style containers) around one amber accent, used for actions and for the
+/// winner. `live` marks open entries, like an on-air light.
 #[derive(Debug, Clone, Copy)]
 struct Swatches {
     bg: u32,
@@ -19,48 +20,48 @@ struct Swatches {
     accent: u32,
     accent_hover: u32,
     accent_soft: u32,
+    accent_text: u32,
     on_accent: u32,
-    gold: u32,
-    gold_soft: u32,
+    live: u32,
     success: u32,
     danger: u32,
     danger_soft: u32,
 }
 
 const DARK: Swatches = Swatches {
-    bg: 0x0f0e17ff,
-    surface: 0x1a1826ff,
-    surface_alt: 0x232034ff,
-    border: 0x312c4aff,
-    text: 0xeceaf6ff,
-    muted: 0x9a96b2ff,
-    accent: 0x8b5cf6ff,
-    accent_hover: 0x9d74f8ff,
-    accent_soft: 0x8b5cf62e,
-    on_accent: 0xffffffff,
-    gold: 0xf5b83dff,
-    gold_soft: 0xf5b83d24,
-    success: 0x22c55eff,
-    danger: 0xf87171ff,
-    danger_soft: 0xef444424,
+    bg: 0x0e0d0bff,
+    surface: 0x1a1814ff,
+    surface_alt: 0x24211cff,
+    border: 0x34302aff,
+    text: 0xf3efe6ff,
+    muted: 0x9c968aff,
+    accent: 0xffb84dff,
+    accent_hover: 0xffc670ff,
+    accent_soft: 0xffb84d24,
+    accent_text: 0xffc670ff,
+    on_accent: 0x2a1800ff,
+    live: 0xff5a4fff,
+    success: 0x6ad48aff,
+    danger: 0xff8a80ff,
+    danger_soft: 0xff8a8024,
 };
 
 const LIGHT: Swatches = Swatches {
-    bg: 0xf6f5fbff,
-    surface: 0xffffffff,
-    surface_alt: 0xf1eff9ff,
-    border: 0xe2dff0ff,
-    text: 0x1b1830ff,
-    muted: 0x6b6785ff,
-    accent: 0x7c3aedff,
-    accent_hover: 0x6d28d9ff,
-    accent_soft: 0x7c3aed1f,
+    bg: 0xf7f4eeff,
+    surface: 0xfffdf9ff,
+    surface_alt: 0xefeae0ff,
+    border: 0xe0d9ccff,
+    text: 0x1d1b16ff,
+    muted: 0x6e685cff,
+    accent: 0x8a5100ff,
+    accent_hover: 0x7a4700ff,
+    accent_soft: 0x8a51001a,
+    accent_text: 0x8a5100ff,
     on_accent: 0xffffffff,
-    gold: 0xc98a06ff,
-    gold_soft: 0xf5b83d33,
-    success: 0x16a34aff,
-    danger: 0xdc2626ff,
-    danger_soft: 0xdc26261a,
+    live: 0xd93025ff,
+    success: 0x1e8e3eff,
+    danger: 0xb3261eff,
+    danger_soft: 0xb3261e14,
 };
 
 fn css(color: u32) -> String {
@@ -79,9 +80,8 @@ pub(super) struct Palette {
     pub muted: Hsla,
     pub accent: Hsla,
     pub accent_soft: Hsla,
-    pub on_accent: Hsla,
-    pub gold: Hsla,
-    pub gold_soft: Hsla,
+    pub accent_text: Hsla,
+    pub live: Hsla,
     pub success: Hsla,
     pub danger: Hsla,
     pub danger_soft: Hsla,
@@ -100,9 +100,8 @@ impl Palette {
             muted: c(s.muted),
             accent: c(s.accent),
             accent_soft: c(s.accent_soft),
-            on_accent: c(s.on_accent),
-            gold: c(s.gold),
-            gold_soft: c(s.gold_soft),
+            accent_text: c(s.accent_text),
+            live: c(s.live),
             success: c(s.success),
             danger: c(s.danger),
             danger_soft: c(s.danger_soft),
@@ -138,7 +137,7 @@ fn theme_config(theme: ThemeChoice) -> ThemeConfig {
     let value = json!({
         "name": name,
         "mode": mode,
-        "radius": 8,
+        "radius": 10,
         "colors": {
             "background": css(s.bg),
             "foreground": css(s.text),
@@ -171,9 +170,9 @@ fn theme_config(theme: ThemeChoice) -> ThemeConfig {
             "danger.background": css(s.danger),
             "danger.hover.background": css(s.danger),
             "danger.active.background": css(s.danger),
-            "danger.foreground": css(s.on_accent),
+            "danger.foreground": css(s.bg),
             "success.background": css(s.success),
-            "success.foreground": css(s.on_accent),
+            "success.foreground": css(s.bg),
             "scrollbar.thumb.background": css(s.border),
             "scrollbar.thumb.hover.background": css(s.muted)
         }
