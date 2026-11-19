@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::chat::{ChannelLogin, Keyword};
 use super::eligibility::Eligibility;
 use super::matcher::MatchMode;
-use super::prefs::{Language, ThemeChoice, lenient};
+use super::prefs::{Language, ThemeChoice, lenient, lenient_or_default};
 use super::role::Weights;
 
 /// User settings kept across restarts.
@@ -14,6 +14,8 @@ pub struct Config {
     pub keyword: Keyword,
     pub mode: MatchMode,
     pub weights: Weights,
+    /// A value this version cannot read falls back to "no conditions", keeping other settings.
+    #[serde(deserialize_with = "lenient_or_default")]
     pub eligibility: Eligibility,
     /// None = follow the OS language.
     #[serde(deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
@@ -98,7 +100,7 @@ theme = \"neon\"
                 subs_only: true,
                 require_activity: true,
                 active_window: ActiveWindow {
-                    amount: 2,
+                    amount: std::num::NonZeroU32::new(2).unwrap(),
                     unit: TimeUnit::Hours,
                 },
             },
@@ -110,6 +112,18 @@ theme = \"neon\"
             Config::from_toml("").unwrap().eligibility,
             Eligibility::default()
         );
+    }
+
+    #[test]
+    fn unreadable_conditions_fall_back_to_none_and_keep_other_settings() {
+        for text in [
+            "keyword = \"!join\"\n[eligibility]\nsubs_only = true\nactive_window = { amount = 0 }\n",
+            "keyword = \"!join\"\n[eligibility]\nsubs_only = true\nactive_window = { unit = \"days\" }\n",
+        ] {
+            let config = Config::from_toml(text).unwrap();
+            assert_eq!(config.eligibility, Eligibility::default(), "{text}");
+            assert_eq!(config.keyword.as_str(), "!join");
+        }
     }
 
     #[test]

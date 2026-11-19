@@ -103,6 +103,11 @@ impl Giveaway {
         self.winners.clear();
     }
 
+    /// The entrant at `index` in entry order.
+    pub fn entrant_at(&self, index: usize) -> Option<&Entrant> {
+        self.entrants.get_index(index).map(|(_, entrant)| entrant)
+    }
+
     /// Entrants in the order they entered.
     pub fn entrants(&self) -> impl ExactSizeIterator<Item = &Entrant> {
         self.entrants.values()
@@ -122,7 +127,8 @@ impl Giveaway {
         }
         let matched = matches(self.mode, &self.keyword, &msg.text);
         if !matched {
-            self.activity.record(&msg.user_id, now);
+            self.activity
+                .record(&msg.user_id, now, self.eligibility.active_window.duration());
         }
         let roles = roles_from_badges(&msg.badges);
         if let Some(entrant) = self.entrants.get_mut(&msg.user_id) {

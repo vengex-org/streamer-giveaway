@@ -52,6 +52,17 @@ where
     Ok(value.try_into().ok())
 }
 
+/// Reads a setting, falling back to its default when this version cannot read the value (e.g. a
+/// time unit added later), instead of failing the whole settings file.
+pub fn lenient_or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: serde::de::DeserializeOwned + Default,
+{
+    let value = toml::Value::deserialize(deserializer)?;
+    Ok(value.try_into().unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
