@@ -357,7 +357,7 @@ async fn session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::chat::SubBadge;
+    use crate::domain::chat::{Profile, SubBadge};
     use crate::domain::platform::Platform;
     use crate::domain::role::Role;
 
@@ -418,6 +418,10 @@ mod tests {
         let member = messages[0];
         assert_eq!(member.platform(), Platform::YouTube);
         assert_eq!(member.user().id, "UCmember0000000000000001");
+        assert_eq!(
+            member.profile().map(Profile::url).as_deref(),
+            Some("https://www.youtube.com/channel/UCmember0000000000000001")
+        );
         assert_eq!(member.display_name(), "@member_viewer");
         assert_eq!(member.text(), "GIVEME");
         assert_eq!(member.roles(), [Role::SubT1]);

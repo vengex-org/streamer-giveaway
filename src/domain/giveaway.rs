@@ -4,7 +4,7 @@ use std::time::Instant;
 use indexmap::IndexMap;
 use rand::{Rng, RngExt};
 
-use super::chat::{ChatMessage, Keyword, SubBadge};
+use super::chat::{ChatMessage, Keyword, Profile, SubBadge};
 use super::eligibility::{ActivityLog, Eligibility};
 use super::matcher::{MatchMode, matches};
 use super::platform::UserKey;
@@ -19,6 +19,8 @@ pub struct Entrant {
     pub roles: Vec<Role>,
     /// Last known subscriber badge, for the channel's badge picture.
     pub sub_badge: Option<SubBadge>,
+    /// Profile page, when the platform sent the name it needs.
+    pub profile: Option<Profile>,
 }
 
 impl Entrant {
@@ -142,6 +144,7 @@ impl Giveaway {
         if let Some(entrant) = self.entrants.get_mut(msg.user()) {
             entrant.roles = roles;
             entrant.sub_badge = msg.sub_badge().cloned();
+            entrant.profile = msg.profile().cloned();
             msg.display_name().clone_into(&mut entrant.display_name);
             return MessageOutcome::AlreadyEntered;
         }
@@ -162,6 +165,7 @@ impl Giveaway {
                 display_name: msg.display_name().to_owned(),
                 roles,
                 sub_badge: msg.sub_badge().cloned(),
+                profile: msg.profile().cloned(),
             },
         );
         MessageOutcome::Entered
@@ -282,6 +286,17 @@ mod tests {
         );
         assert_eq!(outcome, MessageOutcome::AlreadyEntered);
         assert_eq!(ids(&g), ["1"]);
+    }
+
+    #[test]
+    fn an_entrant_keeps_the_profile_their_latest_message_sent() {
+        let mut g = open_giveaway();
+        let profile = Profile::Twitch(crate::domain::chat::ChannelLogin::parse("viewer").unwrap());
+        g.on_message(&msg("1", "YEP", &[]), &Weights::default(), Instant::now());
+        assert_eq!(g.entrants().next().unwrap().profile, None);
+        let linked = msg("1", "hi", &[]).with_profile(Some(profile.clone()));
+        g.on_message(&linked, &Weights::default(), Instant::now());
+        assert_eq!(g.entrants().next().unwrap().profile, Some(profile));
     }
 
     #[test]

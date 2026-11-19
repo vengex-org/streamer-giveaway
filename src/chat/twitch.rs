@@ -7,7 +7,7 @@ use twitch_irc::message::{PrivmsgMessage, ServerMessage};
 use twitch_irc::{ClientConfig, SecureTCPTransport, TwitchIRCClient};
 
 use super::{ChatEvent, ChatTarget, ConnectionStatus};
-use crate::domain::chat::{Badge, ChannelLogin, ChatMessage};
+use crate::domain::chat::{Badge, ChannelLogin, ChatMessage, Profile};
 use crate::domain::platform::Platform;
 
 /// How often the task asks `twitch-irc` whether the channel is still joined. A guess, not
@@ -25,6 +25,11 @@ pub fn to_chat_message(msg: &PrivmsgMessage) -> ChatMessage {
         msg.sender.name.clone(),
         msg.message_text.clone(),
         &badges,
+    )
+    .with_profile(
+        ChannelLogin::parse(&msg.sender.login)
+            .ok()
+            .map(Profile::Twitch),
     )
 }
 
@@ -172,6 +177,9 @@ mod tests {
                     Badge::new("subscriber", "3012")
                 ]
             )
+            .with_profile(Some(Profile::Twitch(
+                ChannelLogin::parse("viewer_1").unwrap()
+            )))
         );
     }
 

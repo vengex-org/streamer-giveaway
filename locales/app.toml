@@ -371,6 +371,12 @@ en = "Draw another"
 cs = "Losovat dalšího"
 es = "Sortear otro"
 
+[winner.profile]
+sk = "Otvoriť profil"
+en = "Open profile"
+cs = "Otevřít profil"
+es = "Abrir perfil"
+
 [winner.done]
 sk = "Hotovo"
 en = "Done"

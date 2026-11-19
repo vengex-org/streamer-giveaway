@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::badges::BadgeUrl;
-use super::platform::{Platform, UserKey};
+use super::platform::{KickChannel, Platform, UserKey};
 use super::role::{Role, kick_roles, roles_from_badges, youtube_roles};
 
 /// A chat badge as Twitch sends it in the `badges` tag, e.g. `subscriber/3012`.
@@ -31,6 +31,37 @@ pub struct ChatMessage {
     roles: Vec<Role>,
     is_owner: bool,
     sub_badge: Option<SubBadge>,
+    profile: Option<Profile>,
+}
+
+/// A chatter's profile page. Built only from checked names, so text from chat cannot point the
+/// link at another site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Profile {
+    Twitch(ChannelLogin),
+    Kick(KickChannel),
+    /// A YouTube channel id: `UC` and 22 letters, digits, `-` or `_`.
+    YouTube(String),
+}
+
+impl Profile {
+    /// The profile of a YouTube channel id; `None` when the id is not one.
+    pub fn youtube(channel_id: &str) -> Option<Self> {
+        let rest = channel_id.strip_prefix("UC")?;
+        let valid = rest.len() == 22
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        valid.then(|| Self::YouTube(channel_id.to_owned()))
+    }
+
+    pub fn url(&self) -> String {
+        match self {
+            Self::Twitch(login) => format!("https://www.twitch.tv/{}", login.as_str()),
+            Self::Kick(slug) => format!("https://kick.com/{}", slug.as_str()),
+            Self::YouTube(id) => format!("https://www.youtube.com/channel/{id}"),
+        }
+    }
 }
 
 /// What picks a subscriber's badge picture. Twitch and Kick name a badge of the channel's own
@@ -69,6 +100,7 @@ impl ChatMessage {
         badges: &[Badge],
     ) -> Self {
         Self {
+            profile: None,
             user: UserKey::new(Platform::Twitch, id),
             display_name: display_name.into(),
             text: text.into(),
@@ -88,6 +120,7 @@ impl ChatMessage {
         badges: &[KickBadge],
     ) -> Self {
         Self {
+            profile: None,
             user: UserKey::new(Platform::Kick, id),
             display_name: display_name.into(),
             text: text.into(),
@@ -107,7 +140,9 @@ impl ChatMessage {
         text: impl Into<String>,
         badges: &[YouTubeBadge],
     ) -> Self {
+        let channel_id = channel_id.into();
         Self {
+            profile: Profile::youtube(&channel_id),
             user: UserKey::new(Platform::YouTube, channel_id),
             display_name: display_name.into(),
             text: text.into(),
@@ -147,6 +182,16 @@ impl ChatMessage {
 
     pub fn sub_badge(&self) -> Option<&SubBadge> {
         self.sub_badge.as_ref()
+    }
+
+    pub fn profile(&self) -> Option<&Profile> {
+        self.profile.as_ref()
+    }
+
+    /// The author's profile page, for Twitch and Kick where the link needs the login name,
+    /// which the message sends apart from the display name.
+    pub fn with_profile(self, profile: Option<Profile>) -> Self {
+        Self { profile, ..self }
     }
 
     /// The same author saying something else.
@@ -253,6 +298,32 @@ impl From<ChannelLogin> for String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profiles_link_to_each_platform() {
+        let twitch = Profile::Twitch(ChannelLogin::parse("viewer_1").unwrap());
+        assert_eq!(twitch.url(), "https://www.twitch.tv/viewer_1");
+        let kick = Profile::Kick(KickChannel::parse("sub-viewer").unwrap());
+        assert_eq!(kick.url(), "https://kick.com/sub-viewer");
+        let youtube = Profile::youtube("UCmember0000000000000001").unwrap();
+        assert_eq!(
+            youtube.url(),
+            "https://www.youtube.com/channel/UCmember0000000000000001"
+        );
+    }
+
+    #[test]
+    fn a_youtube_message_links_its_channel_and_rejects_other_ids() {
+        let msg = ChatMessage::youtube("UCmember0000000000000001", "@m", "hi", &[]);
+        assert!(msg.profile().is_some());
+        for bad in [
+            "UC123",
+            "XXmember0000000000000001",
+            "UCmember000000000000/../x",
+        ] {
+            assert_eq!(Profile::youtube(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn keyword_is_trimmed() {

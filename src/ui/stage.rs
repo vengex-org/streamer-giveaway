@@ -404,6 +404,7 @@ impl AppView {
         let winner = watch.winner();
         let (role, _) = winner.effective(&self.config.weights);
         let elapsed = format_clock(watch.elapsed(Instant::now()));
+        let profile_url = winner.profile.as_ref().map(|profile| profile.url());
         let status = match watch.state() {
             WaitState::Waiting => div()
                 .text_color(p.muted)
@@ -511,6 +512,14 @@ impl AppView {
                             .disabled(can_win == 0)
                             .on_click(cx.listener(|this, _, _, cx| this.draw(cx))),
                     )
+                    .children(profile_url.map(|url| {
+                        Button::new("open-profile")
+                            .large()
+                            .outline()
+                            .icon(IconName::ExternalLink)
+                            .label(t!("winner.profile").into_owned())
+                            .on_click(move |_, _, cx| cx.open_url(&url))
+                    }))
                     .child(
                         Button::new("done")
                             .large()
@@ -573,6 +582,7 @@ mod tests {
             display_name: "Lucky".into(),
             roles: vec![Role::Pleb],
             sub_badge: None,
+            profile: None,
         };
         let mut stage = Stage::Revealing {
             reel: vec!["Lucky".into()],

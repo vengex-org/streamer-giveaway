@@ -11,7 +11,7 @@ use tokio_tungstenite::tungstenite::{self, Message};
 use super::{
     ChatEvent, ChatTarget, FailReason, Link, Stop, USER_AGENT, fetch_text, run_with_retries,
 };
-use crate::domain::chat::{ChatMessage, KickBadge};
+use crate::domain::chat::{ChatMessage, KickBadge, Profile};
 use crate::domain::platform::KickChannel;
 
 const ORIGIN: &str = "https://kick.com";
@@ -136,6 +136,8 @@ struct KickChat {
 struct KickSender {
     id: u64,
     username: String,
+    /// The name in the profile link (`kick.com/<slug>`).
+    slug: String,
     identity: KickIdentity,
 }
 
@@ -198,12 +200,18 @@ fn chat_message(data: &PushData) -> Option<ChatMessage> {
             months: badge.count,
         })
         .collect();
-    Some(ChatMessage::kick(
-        chat.sender.id.to_string(),
-        chat.sender.username,
-        emote_names(&chat.content),
-        &badges,
-    ))
+    let profile = KickChannel::parse(&chat.sender.slug)
+        .ok()
+        .map(Profile::Kick);
+    Some(
+        ChatMessage::kick(
+            chat.sender.id.to_string(),
+            chat.sender.username,
+            emote_names(&chat.content),
+            &badges,
+        )
+        .with_profile(profile),
+    )
 }
 
 /// Kick writes emotes as `[emote:<id>:<name>]`; the name is what chat sees and types.
@@ -387,6 +395,10 @@ mod tests {
         assert_eq!(sub.platform(), Platform::Kick);
         assert_eq!(sub.user().id, "1001");
         assert_eq!(sub.display_name(), "sub_viewer");
+        assert_eq!(
+            sub.profile().map(Profile::url).as_deref(),
+            Some("https://kick.com/sub_viewer")
+        );
         assert_eq!(sub.text(), "collectiblesNOWAY");
         assert_eq!(sub.roles(), [Role::SubT1]);
         assert_eq!(sub.sub_badge(), Some(&SubBadge::Kick(2)));

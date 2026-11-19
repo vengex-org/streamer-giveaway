@@ -138,8 +138,6 @@ fn badges(rng: &mut StdRng) -> Vec<Badge> {
     badges
 }
 
-/// The scripted feed: [`TOTAL_MESSAGES`] messages with their time offset from the start, in
-/// order. The same seed gives the same feed.
 /// A chatter from a joined chat to say something while the feed is idle; `None` when no chat is
 /// joined.
 fn idle_author<'a>(
@@ -155,6 +153,8 @@ fn idle_author<'a>(
     authors.choose(rng).copied()
 }
 
+/// The scripted feed: [`TOTAL_MESSAGES`] messages with their time offset from the start, in
+/// order. The same seed gives the same feed.
 pub fn feed(seed: u64) -> Vec<(Duration, ChatMessage)> {
     let mut rng = StdRng::seed_from_u64(seed);
     let people = chatters(&mut rng, CHATTERS);
