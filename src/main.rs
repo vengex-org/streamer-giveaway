@@ -25,7 +25,7 @@ fn main() {
         )
         .init();
 
-    // `--demo` swaps Twitch for a simulated chat and keeps its own settings file;
+    // `--demo` swaps the real chats for a simulated one and keeps its own settings file;
     // `--demo-viewers=N` (with optional `--demo-share`, `--demo-half-life`, `--demo-chat`,
     // `--demo-cap`) plays a giveaway announced to N viewers instead.
     let args: Vec<String> = std::env::args().collect();

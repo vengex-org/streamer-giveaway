@@ -48,7 +48,7 @@ impl AppView {
     pub(super) fn render_header(&self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let (dot, status) = match self.config.chat_mode {
-            ChatMode::Single(platform) => self.status_line(self.status(platform)),
+            ChatMode::Single => self.status_line(self.status(self.config.platform)),
             ChatMode::Multi => self.multi_status_line(),
         };
 

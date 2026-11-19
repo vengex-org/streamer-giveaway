@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::{BACKOFF, ChatEvent, ChatTarget, ConnectionStatus, FailReason, USER_AGENT};
+use super::{ChatEvent, ChatTarget, FailReason, Link, Stop, fetch_text, run_with_retries};
 use crate::domain::badges::BadgeUrl;
 use crate::domain::chat::{ChatMessage, YouTubeBadge};
-use crate::domain::platform::{Platform, YouTubeSource};
+use crate::domain::platform::YouTubeSource;
 
 /// Skips YouTube's cookie consent page, which otherwise replaces every page in the EU.
 const CONSENT_COOKIE: &str = "SOCS=CAI";
@@ -121,8 +121,8 @@ fn initial_data(html: &str) -> Option<Value> {
 /// One `get_live_chat` answer.
 #[derive(Debug, Default)]
 struct ChatPage {
-    /// Messages with their YouTube timestamp in microseconds.
-    messages: Vec<(u64, ChatMessage)>,
+    /// Messages with their YouTube message id.
+    messages: Vec<(String, ChatMessage)>,
     /// The next continuation and how long to wait for it; `None` once the stream has ended.
     next: Option<(String, Duration)>,
     /// Actions that were not chat messages or could not be read, by kind, for the log.
@@ -185,10 +185,10 @@ fn action_kind(action: &Value) -> String {
     }
 }
 
-fn chat_message(renderer: &Value) -> Option<(u64, ChatMessage)> {
+fn chat_message(renderer: &Value) -> Option<(String, ChatMessage)> {
+    let id = renderer["id"].as_str()?.to_owned();
     let channel_id = renderer["authorExternalChannelId"].as_str()?;
     let name = renderer.pointer("/authorName/simpleText")?.as_str()?;
-    let timestamp = renderer["timestampUsec"].as_str()?.parse().ok()?;
     let text = renderer
         .pointer("/message/runs")
         .and_then(Value::as_array)
@@ -200,10 +200,7 @@ fn chat_message(renderer: &Value) -> Option<(u64, ChatMessage)> {
         .flatten()
         .filter_map(|badge| author_badge(&badge["liveChatAuthorBadgeRenderer"]))
         .collect();
-    Some((
-        timestamp,
-        ChatMessage::youtube(channel_id, name, text, &badges),
-    ))
+    Some((id, ChatMessage::youtube(channel_id, name, text, &badges)))
 }
 
 /// Text as chat sees it: plain runs as they are, emoji as the character, channel emoji by their
@@ -241,122 +238,61 @@ fn author_badge(badge: &Value) -> Option<YouTubeBadge> {
     }
 }
 
-/// Why a connection attempt ended.
-enum Stop {
-    UiGone,
-    Fail(FailReason),
-    Retry(String),
+/// Message ids already handed on, so the history a chat page repeats after a reconnect is not
+/// counted twice. A page holds at most a few hundred messages; this keeps many pages' worth.
+const SEEN_IDS: usize = 5000;
+
+#[derive(Debug, Default)]
+struct SeenIds {
+    order: std::collections::VecDeque<String>,
+    ids: std::collections::HashSet<String>,
+}
+
+impl SeenIds {
+    /// Records `id`; `false` when it was seen before.
+    fn insert(&mut self, id: String) -> bool {
+        if !self.ids.insert(id.clone()) {
+            return false;
+        }
+        self.order.push_back(id);
+        if self.order.len() > SEEN_IDS
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.ids.remove(&oldest);
+        }
+        true
+    }
 }
 
 /// Reads one stream's chat until the task is aborted, the UI is gone, or the stream is over.
-/// Network and server errors are retried with [`BACKOFF`].
 pub(super) async fn run(source: YouTubeSource, events: async_channel::Sender<ChatEvent>) {
     let target = ChatTarget::YouTube(source.clone());
-    let send = |status: ConnectionStatus| {
-        let events = events.clone();
-        async move {
-            events
-                .send(ChatEvent::Status(Platform::YouTube, status))
-                .await
-                .is_ok()
-        }
-    };
-    let client = match gpui_pre_reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-    {
-        Ok(client) => client,
-        Err(err) => {
-            let reason = FailReason::Protocol(format!("http client: {err}"));
-            send(ConnectionStatus::Failed { target, reason }).await;
-            return;
-        }
-    };
-    let mut attempt = 0;
-    let mut cause: Option<String> = None;
-    let mut was_connected = false;
-    // Newest message timestamp handed on. The first chat page repeats recent history; only what
-    // is newer counts, so a reconnect fills the gap without replaying old messages.
-    let mut seen_until: Option<u64> = None;
-    loop {
-        let status = if was_connected {
-            ConnectionStatus::Reconnecting {
-                target: target.clone(),
-                cause: cause.clone(),
-            }
-        } else {
-            ConnectionStatus::Connecting {
-                target: target.clone(),
-                cause: cause.clone(),
-            }
-        };
-        if !send(status).await {
-            return;
-        }
-        let stop = session(
-            &client,
-            &source,
-            &target,
-            &events,
-            &mut was_connected,
-            &mut seen_until,
-            &mut attempt,
-        )
-        .await;
-        match stop {
-            Stop::UiGone => return,
-            Stop::Fail(reason) => {
-                tracing::warn!(?reason, "youtube chat stopped");
-                send(ConnectionStatus::Failed { target, reason }).await;
-                return;
-            }
-            Stop::Retry(why) => {
-                tracing::info!(why, "youtube chat reconnecting");
-                tokio::time::sleep(BACKOFF[attempt.min(BACKOFF.len() - 1)]).await;
-                attempt += 1;
-                cause = Some(why);
-            }
-        }
-    }
+    // The very first page is chat history from before the app connected; it is only remembered.
+    let mut seen = SeenIds::default();
+    let mut history_skipped = false;
+    run_with_retries(target, events, async |client, link: &Link| {
+        session(client, &source, link, &mut seen, &mut history_skipped).await
+    })
+    .await;
 }
 
-fn http_stop(what: &str, status: gpui_pre_reqwest::StatusCode) -> Stop {
-    match status.as_u16() {
-        404 => Stop::Fail(FailReason::NotFound),
-        401 | 403 => Stop::Fail(FailReason::Blocked),
-        429 | 500..=599 => Stop::Retry(format!("{what}: HTTP {status}")),
-        _ => Stop::Fail(FailReason::Protocol(format!("{what}: HTTP {status}"))),
-    }
-}
-
-async fn text_of(request: gpui_pre_reqwest::RequestBuilder, what: &str) -> Result<String, Stop> {
-    let response = request
+/// YouTube pages need the consent cookie and English texts (the chat view is found by title).
+fn page_request(request: gpui_pre_reqwest::RequestBuilder) -> gpui_pre_reqwest::RequestBuilder {
+    request
         .header("Cookie", CONSENT_COOKIE)
         .header("Accept-Language", "en-US,en;q=0.9")
-        .send()
-        .await
-        .map_err(|err| Stop::Retry(format!("{what}: {err}")))?;
-    if !response.status().is_success() {
-        return Err(http_stop(what, response.status()));
-    }
-    response
-        .text()
-        .await
-        .map_err(|err| Stop::Retry(format!("{what}: {err}")))
 }
 
 async fn session(
     client: &gpui_pre_reqwest::Client,
     source: &YouTubeSource,
-    target: &ChatTarget,
-    events: &async_channel::Sender<ChatEvent>,
-    was_connected: &mut bool,
-    seen_until: &mut Option<u64>,
-    attempt: &mut usize,
+    link: &Link,
+    seen: &mut SeenIds,
+    history_skipped: &mut bool,
 ) -> Stop {
     let video = match (source, live_page_url(source)) {
         (YouTubeSource::Video(id), _) => id.clone(),
-        (_, Some(url)) => match text_of(client.get(url), "live page").await {
+        (_, Some(url)) => match fetch_text(page_request(client.get(url)), "live page").await {
             Ok(html) => match find_live_video(&html) {
                 Ok(id) => id,
                 Err(reason) => return Stop::Fail(reason),
@@ -365,7 +301,8 @@ async fn session(
         },
         (_, None) => unreachable!("only a video id has no live page"),
     };
-    let setup = match text_of(client.get(chat_page_url(&video)), "chat page").await {
+    let setup = match fetch_text(page_request(client.get(chat_page_url(&video))), "chat page").await
+    {
         Ok(html) => match chat_setup(&html) {
             Ok(setup) => setup,
             Err(reason) => return Stop::Fail(reason),
@@ -390,37 +327,25 @@ async fn session(
             .post(&url)
             .header("Content-Type", "application/json")
             .body(body.to_string());
-        let page = match text_of(request, "chat").await {
+        let page = match fetch_text(page_request(request), "chat").await {
             Ok(json) => match parse_chat(&json) {
                 Ok(page) => page,
                 Err(reason) => return Stop::Fail(reason),
             },
             Err(stop) => return stop,
         };
-        if !*was_connected || *attempt > 0 {
-            *was_connected = true;
-            *attempt = 0;
-            let connected = ConnectionStatus::Connected(target.clone());
-            if events
-                .send(ChatEvent::Status(Platform::YouTube, connected))
-                .await
-                .is_err()
-            {
-                return Stop::UiGone;
-            }
+        if !link.reached() && !link.connected().await {
+            return Stop::UiGone;
         }
         if !page.skipped.is_empty() {
             tracing::debug!(skipped = page.skipped.len(), first = %page.skipped[0], "youtube actions skipped");
         }
-        let newest = page.messages.iter().map(|(at, _)| *at).max();
-        if let Some(since) = *seen_until {
-            for (at, message) in page.messages {
-                if at > since && events.send(ChatEvent::Message(message)).await.is_err() {
-                    return Stop::UiGone;
-                }
+        for (id, message) in page.messages {
+            if seen.insert(id) && *history_skipped && !link.message(message).await {
+                return Stop::UiGone;
             }
         }
-        *seen_until = (*seen_until).max(newest).or(Some(0));
+        *history_skipped = true;
         let Some((next, wait)) = page.next else {
             return Stop::Fail(FailReason::Offline);
         };
@@ -433,6 +358,7 @@ async fn session(
 mod tests {
     use super::*;
     use crate::domain::chat::SubBadge;
+    use crate::domain::platform::Platform;
     use crate::domain::role::Role;
 
     const CHAT_PAGE: &str = include_str!("../../tests/fixtures/youtube/live_chat.html");
@@ -481,6 +407,7 @@ mod tests {
     fn recorded_answer_gives_messages_roles_badges_and_the_next_poll() {
         let page = parse_chat(CHAT_ANSWER).unwrap();
         let messages: Vec<&ChatMessage> = page.messages.iter().map(|(_, m)| m).collect();
+        assert_eq!(page.messages[0].0, "msg-member");
         assert_eq!(messages.len(), 5);
         assert_eq!(page.skipped, ["addLiveChatTickerItemAction"]);
         assert_eq!(
@@ -539,5 +466,17 @@ mod tests {
         );
         let video = YouTubeSource::parse("youtu.be/qSyo5d-dVzA").unwrap();
         assert_eq!(live_page_url(&video), None);
+    }
+
+    #[test]
+    fn a_message_id_counts_once_and_old_ids_are_forgotten() {
+        let mut seen = SeenIds::default();
+        assert!(seen.insert("a".into()));
+        assert!(!seen.insert("a".into()));
+        for n in 0..SEEN_IDS {
+            seen.insert(n.to_string());
+        }
+        assert!(seen.insert("a".into()), "the oldest id makes room");
+        assert_eq!(seen.ids.len(), SEEN_IDS);
     }
 }

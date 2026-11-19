@@ -8,9 +8,11 @@ use futures::{SinkExt as _, StreamExt as _};
 use serde::Deserialize;
 use tokio_tungstenite::tungstenite::{self, Message};
 
-use super::{BACKOFF, ChatEvent, ChatTarget, ConnectionStatus, FailReason, USER_AGENT};
+use super::{
+    ChatEvent, ChatTarget, FailReason, Link, Stop, USER_AGENT, fetch_text, run_with_retries,
+};
 use crate::domain::chat::{ChatMessage, KickBadge};
-use crate::domain::platform::{KickChannel, Platform};
+use crate::domain::platform::KickChannel;
 
 const ORIGIN: &str = "https://kick.com";
 const TOKEN_URL: &str = "https://web.kick.com/api/v1/realtime/auth/connection";
@@ -65,8 +67,8 @@ struct Frames {
     ping: bool,
     /// The connect or subscribe command was answered.
     replies: usize,
-    /// The server refused a command, with its message.
-    error: Option<String>,
+    /// The server refused a command.
+    error: Option<ServerError>,
     /// Frames that were not chat messages or could not be read, by event name, for the log.
     skipped: Vec<String>,
 }
@@ -74,14 +76,36 @@ struct Frames {
 #[derive(Debug, Deserialize)]
 struct Frame {
     id: Option<u64>,
-    error: Option<FrameError>,
+    error: Option<ServerError>,
     push: Option<Push>,
 }
 
-#[derive(Debug, Deserialize)]
-struct FrameError {
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct ServerError {
     code: Option<u32>,
-    message: Option<String>,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    temporary: bool,
+}
+
+/// Centrifugo error codes that pass on their own: internal error, expired token or connection,
+/// too many requests (see Centrifugo's client protocol docs).
+const PASSING_ERRORS: [u32; 4] = [100, 109, 110, 111];
+
+impl ServerError {
+    fn stop(self) -> Stop {
+        let text = match self.code {
+            Some(code) => format!("{code} {}", self.message),
+            None => self.message,
+        };
+        let passing = self.temporary || self.code.is_some_and(|c| PASSING_ERRORS.contains(&c));
+        if passing {
+            Stop::Retry(format!("kick: {text}"))
+        } else {
+            Stop::Fail(FailReason::Protocol(text))
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,10 +164,7 @@ fn read_frames(text: &str) -> Frames {
         match frame {
             Frame {
                 error: Some(error), ..
-            } => {
-                let code = error.code.map_or(String::new(), |c| format!("{c} "));
-                frames.error = Some(format!("{code}{}", error.message.unwrap_or_default()));
-            }
+            } => frames.error = Some(error),
             Frame { id: Some(_), .. } => frames.replies += 1,
             Frame {
                 push:
@@ -206,113 +227,18 @@ fn emote_names(content: &str) -> String {
     out
 }
 
-/// Why a connection attempt ended.
-enum Stop {
-    /// The UI is gone; nothing left to do.
-    UiGone,
-    /// Cannot work until the user changes something.
-    Fail(FailReason),
-    /// Worth another try after a pause.
-    Retry(String),
-    /// The token is about to expire; reconnect now with a fresh one.
-    Refresh,
-}
-
 /// Reads one channel until the task is aborted, the UI is gone, or Kick says the channel cannot
-/// be read. Drops and server errors are retried with [`BACKOFF`].
+/// be read.
 pub(super) async fn run(channel: KickChannel, events: async_channel::Sender<ChatEvent>) {
     let target = ChatTarget::Kick(channel.clone());
-    let send = |status: ConnectionStatus| {
-        let events = events.clone();
-        async move {
-            events
-                .send(ChatEvent::Status(Platform::Kick, status))
-                .await
-                .is_ok()
-        }
-    };
-    let client = match gpui_pre_reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-    {
-        Ok(client) => client,
-        Err(err) => {
-            let reason = FailReason::Protocol(format!("http client: {err}"));
-            send(ConnectionStatus::Failed { target, reason }).await;
-            return;
-        }
-    };
-    let mut attempt = 0;
-    let mut cause: Option<String> = None;
-    let mut was_connected = false;
-    loop {
-        let status = if was_connected {
-            ConnectionStatus::Reconnecting {
-                target: target.clone(),
-                cause: cause.clone(),
-            }
-        } else {
-            ConnectionStatus::Connecting {
-                target: target.clone(),
-                cause: cause.clone(),
-            }
-        };
-        if !send(status).await {
-            return;
-        }
-        match session(&client, &channel, &target, &events, &mut was_connected).await {
-            Stop::UiGone => return,
-            Stop::Fail(reason) => {
-                tracing::warn!(channel = channel.as_str(), ?reason, "kick chat stopped");
-                send(ConnectionStatus::Failed { target, reason }).await;
-                return;
-            }
-            Stop::Refresh => {
-                attempt = 0;
-                cause = None;
-            }
-            Stop::Retry(why) => {
-                tracing::info!(channel = channel.as_str(), why, "kick chat reconnecting");
-                tokio::time::sleep(BACKOFF[attempt.min(BACKOFF.len() - 1)]).await;
-                attempt += 1;
-                cause = Some(why);
-            }
-        }
-    }
+    run_with_retries(target, events, async |client, link: &Link| {
+        session(client, &channel, link).await
+    })
+    .await;
 }
 
-/// HTTP failures: missing channel and refusals are final, everything else is worth a retry.
-fn http_stop(what: &str, status: gpui_pre_reqwest::StatusCode) -> Stop {
-    match status.as_u16() {
-        404 => Stop::Fail(FailReason::NotFound),
-        401 | 403 => Stop::Fail(FailReason::Blocked),
-        429 | 500..=599 => Stop::Retry(format!("{what}: HTTP {status}")),
-        _ => Stop::Fail(FailReason::Protocol(format!("{what}: HTTP {status}"))),
-    }
-}
-
-async fn get_text(request: gpui_pre_reqwest::RequestBuilder, what: &str) -> Result<String, Stop> {
-    let response = request
-        .send()
-        .await
-        .map_err(|err| Stop::Retry(format!("{what}: {err}")))?;
-    if !response.status().is_success() {
-        return Err(http_stop(what, response.status()));
-    }
-    response
-        .text()
-        .await
-        .map_err(|err| Stop::Retry(format!("{what}: {err}")))
-}
-
-async fn session(
-    client: &gpui_pre_reqwest::Client,
-    channel: &KickChannel,
-    target: &ChatTarget,
-    events: &async_channel::Sender<ChatEvent>,
-    was_connected: &mut bool,
-) -> Stop {
-    let channel_json = match get_text(
+async fn session(client: &gpui_pre_reqwest::Client, channel: &KickChannel, link: &Link) -> Stop {
+    let channel_json = match fetch_text(
         client
             .get(channel_url(channel))
             .header("Accept", "application/json"),
@@ -328,7 +254,7 @@ async fn session(
         Err(reason) => return Stop::Fail(reason),
     };
     let client_id = uuid::Uuid::new_v4().to_string();
-    let token_json = match get_text(
+    let token_json = match fetch_text(
         client
             .post(TOKEN_URL)
             .header("Origin", ORIGIN)
@@ -396,7 +322,7 @@ async fn session(
         };
         let frames = read_frames(&text);
         if let Some(error) = frames.error {
-            return Stop::Fail(FailReason::Protocol(error));
+            return error.stop();
         }
         if !frames.skipped.is_empty() {
             tracing::debug!(skipped = frames.skipped.len(), first = %frames.skipped[0], "kick frames skipped");
@@ -408,18 +334,12 @@ async fn session(
         replies += frames.replies;
         if replies >= 2 && !subscribed {
             subscribed = true;
-            *was_connected = true;
-            let connected = ConnectionStatus::Connected(target.clone());
-            if events
-                .send(ChatEvent::Status(Platform::Kick, connected))
-                .await
-                .is_err()
-            {
+            if !link.connected().await {
                 return Stop::UiGone;
             }
         }
         for message in frames.messages {
-            if events.send(ChatEvent::Message(message)).await.is_err() {
+            if !link.message(message).await {
                 return Stop::UiGone;
             }
         }
@@ -430,6 +350,7 @@ async fn session(
 mod tests {
     use super::*;
     use crate::domain::chat::SubBadge;
+    use crate::domain::platform::Platform;
     use crate::domain::role::Role;
 
     const CHANNEL: &str = include_str!("../../tests/fixtures/kick/channel.json");
@@ -487,8 +408,23 @@ mod tests {
         let frames = read_frames(
             "{\"id\":2,\"error\":{\"code\":103,\"message\":\"permission denied\"}}\nnot json",
         );
-        assert_eq!(frames.error.as_deref(), Some("103 permission denied"));
+        let error = frames.error.unwrap();
+        assert!(
+            matches!(error.stop(), Stop::Fail(FailReason::Protocol(text)) if text == "103 permission denied")
+        );
         assert_eq!(frames.skipped, ["unreadable frame"]);
+    }
+
+    #[test]
+    fn passing_server_errors_are_retried() {
+        for frame in [
+            "{\"id\":1,\"error\":{\"code\":109,\"message\":\"token expired\"}}",
+            "{\"id\":1,\"error\":{\"code\":111,\"message\":\"too many requests\"}}",
+            "{\"id\":1,\"error\":{\"code\":2000,\"message\":\"x\",\"temporary\":true}}",
+        ] {
+            let error = read_frames(frame).error.unwrap();
+            assert!(matches!(error.stop(), Stop::Retry(_)), "{frame}");
+        }
     }
 
     #[test]
@@ -497,30 +433,5 @@ mod tests {
         assert_eq!(emote_names("[emote:5:a][emote:6:b]"), "ab");
         assert_eq!(emote_names("broken [emote:7:x"), "broken [emote:7:x");
         assert_eq!(emote_names("plain"), "plain");
-    }
-
-    #[test]
-    fn http_errors_split_into_final_and_retried() {
-        use gpui_pre_reqwest::StatusCode;
-        assert!(matches!(
-            http_stop("channel", StatusCode::NOT_FOUND),
-            Stop::Fail(FailReason::NotFound)
-        ));
-        assert!(matches!(
-            http_stop("channel", StatusCode::FORBIDDEN),
-            Stop::Fail(FailReason::Blocked)
-        ));
-        assert!(matches!(
-            http_stop("channel", StatusCode::BAD_GATEWAY),
-            Stop::Retry(_)
-        ));
-        assert!(matches!(
-            http_stop("channel", StatusCode::TOO_MANY_REQUESTS),
-            Stop::Retry(_)
-        ));
-        assert!(matches!(
-            http_stop("channel", StatusCode::BAD_REQUEST),
-            Stop::Fail(FailReason::Protocol(_))
-        ));
     }
 }

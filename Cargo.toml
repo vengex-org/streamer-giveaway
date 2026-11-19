@@ -2,7 +2,7 @@
 name = "streamer-giveaway"
 version = "0.3.6"
 edition = "2024"
-description = "Desktop app for Twitch chat giveaways: keyword entries, bonus tickets, entry conditions and a winner reveal for stream"
+description = "Desktop app for chat giveaways on Twitch, Kick and YouTube: keyword entries, bonus tickets, entry conditions and a winner reveal for stream"
 license = "MIT"
 repository = "https://github.com/vengex-org/streamer-giveaway"
 readme = "README.md"
@@ -43,3 +43,5 @@ embed-resource = "3"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# Paused clock for the reconnect tests.
+tokio = { version = "1.54.1", features = ["test-util"] }

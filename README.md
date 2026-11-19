@@ -66,7 +66,7 @@ From a terminal the same window starts with:
 cargo run --release -- --demo
 ```
 
-Demo mode replaces Twitch with a simulated chat on `#pixelpaladin`: 6000 messages over three
+Demo mode replaces the real chats with a simulated one on `pixelpaladin`: 6000 messages over three
 minutes from about 2400 chatters, most of them typing `GIVEME`. The drawn winner answers a few
 seconds after the draw. Demo settings are stored separately and never touch your real ones.
 

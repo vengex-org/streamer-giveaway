@@ -99,7 +99,7 @@ impl Notice {
     }
 }
 
-/// Whether this window reads a real Twitch chat or the simulated one.
+/// Whether this window reads real chats or the simulated one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunMode {
     Live,
@@ -114,6 +114,10 @@ pub struct AppView {
     commands: async_channel::Sender<ChatCommand>,
     /// Each platform's chat connection; a missing platform is idle.
     statuses: BTreeMap<Platform, ConnectionStatus>,
+    /// Joins sent whose first status has not come back yet.
+    joining: std::collections::BTreeSet<Platform>,
+    /// The channel each platform's badge pictures belong to, so a reconnect keeps them.
+    badge_channels: HashMap<Platform, ChatTarget>,
     notices: BTreeMap<NoticeSource, Notice>,
     stage: Stage,
     /// Whether the rules step shows its editor (weights and entry conditions).
@@ -297,6 +301,8 @@ impl AppView {
             store,
             commands: bridge.commands,
             statuses: BTreeMap::new(),
+            joining: std::collections::BTreeSet::new(),
+            badge_channels: HashMap::new(),
             notices: startup_notice
                 .map(|cause| (NoticeSource::Startup, Notice::Startup(cause)))
                 .into_iter()
@@ -372,10 +378,12 @@ impl AppView {
                 outcome != MessageOutcome::Ignored || replied
             }
             ChatEvent::Status(platform, status) => {
+                self.joining.remove(&platform);
                 // A channel's badge list loads once per channel, not on every reconnect.
                 if let ConnectionStatus::Connected(target) = &status
-                    && !matches!(self.status(platform), ConnectionStatus::Connected(t) if t == target)
+                    && self.badge_channels.get(&platform) != Some(target)
                 {
+                    self.badge_channels.insert(platform, target.clone());
                     match target {
                         ChatTarget::Twitch(channel) => self.load_badges(channel.clone(), cx),
                         ChatTarget::Kick(channel) => self.load_kick_badges(channel, cx),
@@ -485,6 +493,7 @@ impl AppView {
                         self.config.youtube_source = Some(source.clone());
                     }
                 }
+                self.joining.insert(platform);
                 self.send(ChatCommand::Join(target));
                 self.set_notice(NoticeSource::Channel, None);
                 self.set_notice(NoticeSource::Chat, None);
@@ -496,23 +505,24 @@ impl AppView {
     }
 
     fn disconnect(&mut self, platform: Platform, cx: &mut Context<Self>) {
+        self.joining.remove(&platform);
         self.send(ChatCommand::Leave(platform));
         cx.notify();
     }
 
-    /// One platform or multistream. Switching to one platform leaves the other chats, so the
-    /// giveaway only takes entries from the chat on screen.
-    fn set_chat_mode(&mut self, mode: ChatMode, cx: &mut Context<Self>) {
-        let active: Vec<Platform> = self
-            .statuses
-            .iter()
-            .filter(|(_, status)| !matches!(status, ConnectionStatus::Idle))
-            .map(|(platform, _)| *platform)
-            .collect();
-        for platform in mode.chats_to_leave(&active) {
-            self.send(ChatCommand::Leave(platform));
-        }
+    /// One platform (and which) or multistream. Every chat the new choice does not read is left,
+    /// also one still connecting, so the giveaway only takes entries from the chats on screen.
+    fn choose_chats(&mut self, mode: ChatMode, platform: Platform, cx: &mut Context<Self>) {
         self.config.chat_mode = mode;
+        self.config.platform = platform;
+        let kept = self.config.chat_platforms();
+        for platform in Platform::ALL {
+            let running = !matches!(self.status(platform), ConnectionStatus::Idle);
+            if !kept.contains(&platform) && (running || self.joining.contains(&platform)) {
+                self.joining.remove(&platform);
+                self.send(ChatCommand::Leave(platform));
+            }
+        }
         self.set_notice(NoticeSource::Channel, None);
         self.save();
         cx.notify();

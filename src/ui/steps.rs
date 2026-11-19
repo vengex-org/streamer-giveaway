@@ -183,11 +183,11 @@ impl AppView {
     }
 
     fn connect_hint(&self) -> String {
-        match self.config.chat_mode {
-            ChatMode::Single(Platform::Twitch) => t!("step.connect.hint"),
-            ChatMode::Single(Platform::Kick) => t!("step.connect.hint_kick"),
-            ChatMode::Single(Platform::YouTube) => t!("step.connect.hint_youtube"),
-            ChatMode::Multi => t!("step.connect.hint_multi"),
+        match (self.config.chat_mode, self.config.platform) {
+            (ChatMode::Single, Platform::Twitch) => t!("step.connect.hint"),
+            (ChatMode::Single, Platform::Kick) => t!("step.connect.hint_kick"),
+            (ChatMode::Single, Platform::YouTube) => t!("step.connect.hint_youtube"),
+            (ChatMode::Multi, _) => t!("step.connect.hint_multi"),
         }
         .into_owned()
     }
@@ -196,26 +196,15 @@ impl AppView {
     fn render_connect(&self, active: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.palette;
         let mode = self.config.chat_mode;
-        let single_platform = match mode {
-            ChatMode::Single(platform) => Some(platform),
-            ChatMode::Multi => None,
-        };
-        let remembered = single_platform.unwrap_or(Platform::Twitch);
+        let single_platform = (mode == ChatMode::Single).then_some(self.config.platform);
         let modes = [
-            (
-                ChatMode::Single(remembered),
-                t!("step.connect.mode.single"),
-                single_platform.is_some(),
-            ),
-            (
-                ChatMode::Multi,
-                t!("step.connect.mode.multi"),
-                single_platform.is_none(),
-            ),
+            (ChatMode::Single, t!("step.connect.mode.single")),
+            (ChatMode::Multi, t!("step.connect.mode.multi")),
         ]
-        .map(|(choice, label, selected)| {
+        .map(|(choice, label)| {
+            let selected = choice == mode;
             Button::new(match choice {
-                ChatMode::Single(_) => "chat-mode-single",
+                ChatMode::Single => "chat-mode-single",
                 ChatMode::Multi => "chat-mode-multi",
             })
             .small()
@@ -223,7 +212,9 @@ impl AppView {
             .when(selected, |b| b.primary())
             .when(!selected, |b| b.ghost())
             .label(label.into_owned())
-            .on_click(cx.listener(move |this, _, _, cx| this.set_chat_mode(choice, cx)))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.choose_chats(choice, this.config.platform, cx)
+            }))
         });
         let mut body = v_flex().gap_2().child(
             h_flex()
@@ -250,7 +241,7 @@ impl AppView {
                                 .child(i18n::platform_name(platform)),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_chat_mode(ChatMode::Single(platform), cx)
+                            this.choose_chats(ChatMode::Single, platform, cx)
                         }))
                 });
                 body.child(h_flex().gap_1().children(platforms))

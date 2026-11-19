@@ -416,7 +416,14 @@ fn run(
                 next += 1;
             }
             if next == script.len() && now >= idle_at {
-                let (_, author) = script.choose(&mut rng).expect("the feed is not empty");
+                let joined_authors: Vec<&ChatMessage> = script
+                    .iter()
+                    .map(|(_, m)| m)
+                    .filter(|m| joined.contains(&m.platform()))
+                    .collect();
+                let author = joined_authors
+                    .choose(&mut rng)
+                    .expect("a joined chat has chatters");
                 let line = CHATTER.choose(&mut rng).expect("lines exist");
                 let chatter = author.with_text(*line);
                 if !send(ChatEvent::Message(chatter)) {
