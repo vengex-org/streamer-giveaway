@@ -117,11 +117,22 @@ impl AppView {
             .border_b_1()
             .border_color(p.border)
             .child(
-                div()
-                    .text_base()
-                    .font_bold()
-                    .text_color(p.text)
-                    .child(t!("app.title").into_owned()),
+                h_flex()
+                    .gap_1p5()
+                    .items_baseline()
+                    .child(
+                        div()
+                            .text_base()
+                            .font_bold()
+                            .text_color(p.text)
+                            .child(t!("app.title").into_owned()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(p.muted)
+                            .child(concat!("v", env!("CARGO_PKG_VERSION"))),
+                    ),
             )
             .child(
                 h_flex()
